@@ -2,19 +2,8 @@
 // quickcmd — CliApp.cs: CLI（带参数启动）：CRUD
 // ============================================================================
 
-using System.ComponentModel;
 using System.Diagnostics;
-using System.Drawing;
-using System.Drawing.Drawing2D;
-using System.Drawing.Text;
-using System.IO.Pipes;
-using System.Runtime.InteropServices;
-using System.Text;
-using System.Text.Encodings.Web;
 using System.Text.Json;
-using System.Text.Json.Serialization;
-using System.Windows.Forms;
-using Microsoft.Win32;
 
 namespace QuickCmd;
 
@@ -320,7 +309,7 @@ internal static class CliApp
 
     // useJob=false → run（PID 模式：按 root pid 树跟踪）
     // useJob=true  → run-job（JOB 模式：作业对象整树跟踪，qchost 退化时仍可能落到 PID）
-    // qchost 未运行时自动拉起 quick_run.exe，再走 IPC（实例仍可被托盘跟踪管理）
+    // qchost 未运行时自动拉起 qchost.exe，再走 IPC（实例仍可被托盘跟踪管理）
     private static int CmdRun(string[] a, bool useJob)
     {
         var o = Parse(a);
@@ -342,7 +331,7 @@ internal static class CliApp
         }
         else
         {
-            Console.WriteLine("⚠ 找不到 qchost（quick_run.exe），改为直接启动。");
+            Console.WriteLine("⚠ 找不到 qchost（qchost.exe），改为直接启动。");
         }
 
         // 3) 兜底：直接启动（无 qchost 跟踪，run / run-job 行为相同）
@@ -352,33 +341,12 @@ internal static class CliApp
         return 0;
     }
 
-    // 通过命名管道向 qchost 发一条 IPC 请求。返回：0=拿到响应 1=连接中断/无响应（已打印） 2=qchost 不在（未连上）
+    // 通过共享 IPC 协议向 qchost 发一条请求。返回：0=拿到响应 1=连接中断/无响应（已打印） 2=qchost 不在（未连上）
     private static int TryQchostCall(IpcMessage msg, int connectTimeoutMs, out QchostResponse resp)
     {
-        resp = null;
-        bool connected = false;
-        try
-        {
-            using var pipe = new NamedPipeClientStream(".", Program.PipeName, PipeDirection.InOut);
-            pipe.Connect(connectTimeoutMs);
-            connected = true;
-
-            var req = JsonSerializer.Serialize(msg, Store.JsonOpts);
-            var bytes = Encoding.UTF8.GetBytes(req + "\n");
-            pipe.Write(bytes, 0, bytes.Length);
-            pipe.Flush();
-
-            using var r = new StreamReader(pipe, Encoding.UTF8);
-            var line = r.ReadLine();
-            if (string.IsNullOrWhiteSpace(line)) { Console.WriteLine("错误: qchost 无响应"); return 1; }
-            resp = JsonSerializer.Deserialize<QchostResponse>(line, Store.JsonOpts);
-            return 0;
-        }
-        catch
-        {
-            if (connected) { Console.WriteLine("错误: qchost 连接中断"); return 1; }
-            return 2;
-        }
+        int r = Ipc.TryCall(msg, connectTimeoutMs, out resp, out var failReason);
+        if (r == 1) Console.WriteLine("错误: " + failReason);
+        return r;
     }
 
     // 返回：0=成功 1=失败（已打印） 2=qchost 不在。ps/kill 不自动拉起 qchost：实例本来就活在 qchost 里
@@ -461,21 +429,8 @@ internal static class CliApp
         return gr != null && gr.Ok ? 0 : 1;
     }
 
-    // 拉起 qchost（quick_run.exe，与 quickcmd 同目录优先，其次交给系统搜索）
-    private static bool StartQchostProcess()
-    {
-        try
-        {
-            var dir = Path.GetDirectoryName(Environment.ProcessPath);
-            var exe = dir != null ? Path.Combine(dir, "quick_run.exe") : null;
-            var psi = exe != null && File.Exists(exe)
-                ? new ProcessStartInfo(exe) { WorkingDirectory = dir, UseShellExecute = true }
-                : new ProcessStartInfo("quick_run.exe") { UseShellExecute = true };
-            Process.Start(psi);
-            return true;
-        }
-        catch { return false; }
-    }
+    // 拉起 qchost（与 quickcmd 同目录优先，其次交给系统搜索）
+    private static bool StartQchostProcess() => Ipc.StartHost();
 
     // ----- 输出辅助 -----
 
@@ -515,7 +470,7 @@ internal static class CliApp
     {
         Console.WriteLine("""
 quickcmd — 系统托盘命令启动器（CLI）
-qchost（quick command host）= 常驻托盘的宿主进程 quick_run.exe：负责托盘菜单、实例跟踪、IPC 服务端。
+qchost（quick command host）= 常驻托盘的宿主进程 qchost.exe：负责托盘菜单、实例跟踪、IPC 服务端。
 数据文件: %APPDATA%\quickcmd\commands.jsonl
 
 用法:
@@ -557,8 +512,8 @@ add / update 选项:
 说明:
   - short id 是 GUID 前 8 位；get/update/delete/run/run-job 都可用 short-id、完整 id 或 title 定位
   - run / run-job 把请求交给常驻 qchost（实例可跟踪管理，托盘菜单中以 [PID]/[JOB] 标注模式）；
-    qchost 未运行时自动拉起 quick_run.exe 再执行；找不到/拉不起 qchost 才退回直接启动（不跟踪）
-  - 手动启动 qchost：直接运行 quick_run.exe（无参数，单实例互斥）
+     qchost 未运行时自动拉起 qchost.exe 再执行；找不到/拉不起 qchost 才退回直接启动（不跟踪）
+   - 手动启动 qchost：直接运行 qchost.exe（无参数，单实例互斥）
   - [JOB] 模式用 Windows 作业对象跟踪整棵进程树：launcher 自退后孙进程仍算存活，
     Kill 击杀整树，判定最准；[PID] 模式仅按 root pid 及其子孙树跟踪（root 提前退出会误判结束）
   - ps / kill 只在 qchost 运行时有意义（实例存活于 qchost 进程内），qchost 不在时 ps 提示为空、kill 报错

@@ -2,19 +2,8 @@
 // quickcmd — Manager.cs: 实例（一次运行）、窗口定位与实例管理器
 // ============================================================================
 
-using System.ComponentModel;
 using System.Diagnostics;
-using System.Drawing;
-using System.Drawing.Drawing2D;
-using System.Drawing.Text;
-using System.IO.Pipes;
-using System.Runtime.InteropServices;
 using System.Text;
-using System.Text.Encodings.Web;
-using System.Text.Json;
-using System.Text.Json.Serialization;
-using System.Windows.Forms;
-using Microsoft.Win32;
 
 namespace QuickCmd;
 

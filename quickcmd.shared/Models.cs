@@ -2,19 +2,8 @@
 // quickcmd — Models.cs: 数据模型（JSONL 记录）与 IPC 消息
 // ============================================================================
 
-using System.ComponentModel;
-using System.Diagnostics;
-using System.Drawing;
-using System.Drawing.Drawing2D;
-using System.Drawing.Text;
-using System.IO.Pipes;
-using System.Runtime.InteropServices;
-using System.Text;
-using System.Text.Encodings.Web;
 using System.Text.Json;
 using System.Text.Json.Serialization;
-using System.Windows.Forms;
-using Microsoft.Win32;
 
 namespace QuickCmd;
 

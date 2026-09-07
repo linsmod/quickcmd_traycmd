@@ -1,29 +1,29 @@
-﻿using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Text;
-using System.Threading.Tasks;
+﻿using System.Diagnostics;
 using QuickCmd;
 
 namespace quick_run
 {
-    // qchost（quick command host，quick command 的常驻托盘宿主进程）入口：
-    // 单实例互斥后跑 TrayContext（托盘菜单 + 实例跟踪 + IPC 服务端）
+    // quickcmd-app（qcApp.exe）：常驻托盘的 UI 客户端入口。
+    // 单实例互斥后跑 TrayContext（托盘 + 菜单 + 命令面板）；进程执行/跟踪由 qchost 承担。
     internal class AppUI
     {
-            public static int Run()
+        public static int Run()
+        {
+            bool created;
+            using (var mutex = new Mutex(true, @"Local\quickcmd.app", out created))
             {
-                bool created;
-                // 注：互斥体名中的 "gui" 指 qchost，属存量协议名不改，避免新旧进程互不识别
-                using (var mutex = new Mutex(true, "Local\\quickrun.gui", out created))
+                if (!created) return 0;
+
+                // 启动即拉起 qchost；失败则静默退出（退出码 1），不弹任何窗口
+                if (!Ipc.EnsureHost())
                 {
-                    if (!created)
-                    {
-                        return 0;
-                    }
-                    using (var ctx = new TrayContext()) Application.Run(ctx);
-                    return 0;
+                    Trace.WriteLine("quickcmd: 无法启动 " + Ipc.HostExeName + "（需与本程序同目录或在 PATH 中）");
+                    return 1;
                 }
+
+                using (var ctx = new TrayContext()) Application.Run(ctx);
+                return 0;
             }
+        }
     }
 }

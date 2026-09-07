@@ -3,10 +3,19 @@
   <PropertyGroup>
     <OutputType>WinExe</OutputType>
     <TargetFramework>net8.0-windows</TargetFramework>
-    <Nullable>enable</Nullable>
-    <AssemblyName>qchost</AssemblyName>
-    <UseWindowsForms>true</UseWindowsForms>
+    <Nullable>disable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
+    <AssemblyName>qchost</AssemblyName>
+    <RootNamespace>QuickCmd</RootNamespace>
+    <Version>1.0.0</Version>
+    <ProduceReferenceAssembly>false</ProduceReferenceAssembly>
+    <SatelliteResourceLanguages>en</SatelliteResourceLanguages>
+    <RuntimeIdentifier>win-x64</RuntimeIdentifier>
+    <NuGetAudit>false</NuGetAudit>
   </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\quickcmd.shared\quickcmd.shared.csproj" />
+  </ItemGroup>
 
 </Project>

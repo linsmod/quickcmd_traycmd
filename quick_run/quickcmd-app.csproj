@@ -3,15 +3,22 @@
   <PropertyGroup>
     <OutputType>WinExe</OutputType>
     <TargetFramework>net8.0-windows</TargetFramework>
-    <Nullable>enable</Nullable>
+    <Nullable>disable</Nullable>
     <UseWindowsForms>true</UseWindowsForms>
     <AssemblyName>qcApp</AssemblyName>
     <ImplicitUsings>enable</ImplicitUsings>
+    <Version>1.0.0</Version>
+    <ProduceReferenceAssembly>false</ProduceReferenceAssembly>
+    <SatelliteResourceLanguages>en</SatelliteResourceLanguages>
+    <RuntimeIdentifier>win-x64</RuntimeIdentifier>
+    <NuGetAudit>false</NuGetAudit>
   </PropertyGroup>
+
   <PropertyGroup>
     <NuGetAudit>false</NuGetAudit>
   </PropertyGroup>
   <ItemGroup>
-    <ProjectReference Include="..\traycmd\quickcmd.csproj" />
+    <ProjectReference Include="..\quickcmd.shared\quickcmd.shared.csproj" />
+    <ProjectReference Include="..\hotkey\HotKeyKit.csproj" />
   </ItemGroup>
 </Project>

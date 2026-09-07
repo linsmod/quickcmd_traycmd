@@ -1,0 +1,21 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>disable</Nullable>
+    <AssemblyName>quickcmd.shared</AssemblyName>
+    <RootNamespace>QuickCmd</RootNamespace>
+    <ProduceReferenceAssembly>false</ProduceReferenceAssembly>
+    <SatelliteResourceLanguages>en</SatelliteResourceLanguages>
+    <NuGetAudit>false</NuGetAudit>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- 公用类型保持 internal，仅对三个可执行客户端开放 -->
+    <InternalsVisibleTo Include="quickcmd" />
+    <InternalsVisibleTo Include="qchost" />
+    <InternalsVisibleTo Include="qcApp" />
+  </ItemGroup>
+
+</Project>

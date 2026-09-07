@@ -2,20 +2,6 @@
 // quickcmd — Resolver.cs: 命令定位（id / short-id / title）
 // ============================================================================
 
-using System.ComponentModel;
-using System.Diagnostics;
-using System.Drawing;
-using System.Drawing.Drawing2D;
-using System.Drawing.Text;
-using System.IO.Pipes;
-using System.Runtime.InteropServices;
-using System.Text;
-using System.Text.Encodings.Web;
-using System.Text.Json;
-using System.Text.Json.Serialization;
-using System.Windows.Forms;
-using Microsoft.Win32;
-
 namespace QuickCmd;
 
 // ---------------------------------------------------------------------------

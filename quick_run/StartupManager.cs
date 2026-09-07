@@ -41,7 +41,7 @@ internal static class StartupManager
         }
     }
 
-    public static bool SetEnabled(bool enabled, Action<string, string> notifyCallback = null)
+    public static bool SetEnabled(bool enabled)
     {
         try
         {
@@ -59,9 +59,8 @@ internal static class StartupManager
             }
             return true;
         }
-        catch (Exception ex)
+        catch
         {
-            notifyCallback?.Invoke("quickcmd", "设置启动项失败: " + ex.Message);
             return false;
         }
     }

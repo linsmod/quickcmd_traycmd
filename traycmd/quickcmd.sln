@@ -5,7 +5,11 @@ VisualStudioVersion = 17.14.36811.4
 MinimumVisualStudioVersion = 10.0.40219.1
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "quickcmd", "quickcmd.csproj", "{E46B04FE-72D2-22BE-A7B0-B29DA9187B5D}"
 EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "quickcmd.app", "..\quick_run\quickcmd.app.csproj", "{A47DB0E0-17FE-4027-AFB7-DFE6E41DA538}"
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "quickcmd.shared", "..\quickcmd.shared\quickcmd.shared.csproj", "{915BD2BC-1186-45D3-9C02-A1E5BD6BA330}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "quickcmd-host", "..\quickcmdhost\quickcmd-host.csproj", "{78DC7FE6-A556-4EF9-9CB6-D81DAA6BF251}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "quickcmd-app", "..\quick_run\quickcmd-app.csproj", "{A47DB0E0-17FE-4027-AFB7-DFE6E41DA538}"
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "HotKeyKit", "..\hotkey\HotKeyKit.csproj", "{4D4867FE-0B68-D89E-045E-7C05D18CFE17}"
 EndProject
@@ -19,6 +23,14 @@ Global
 		{E46B04FE-72D2-22BE-A7B0-B29DA9187B5D}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{E46B04FE-72D2-22BE-A7B0-B29DA9187B5D}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{E46B04FE-72D2-22BE-A7B0-B29DA9187B5D}.Release|Any CPU.Build.0 = Release|Any CPU
+		{915BD2BC-1186-45D3-9C02-A1E5BD6BA330}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{915BD2BC-1186-45D3-9C02-A1E5BD6BA330}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{915BD2BC-1186-45D3-9C02-A1E5BD6BA330}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{915BD2BC-1186-45D3-9C02-A1E5BD6BA330}.Release|Any CPU.Build.0 = Release|Any CPU
+		{78DC7FE6-A556-4EF9-9CB6-D81DAA6BF251}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{78DC7FE6-A556-4EF9-9CB6-D81DAA6BF251}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{78DC7FE6-A556-4EF9-9CB6-D81DAA6BF251}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{78DC7FE6-A556-4EF9-9CB6-D81DAA6BF251}.Release|Any CPU.Build.0 = Release|Any CPU
 		{A47DB0E0-17FE-4027-AFB7-DFE6E41DA538}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
 		{A47DB0E0-17FE-4027-AFB7-DFE6E41DA538}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{A47DB0E0-17FE-4027-AFB7-DFE6E41DA538}.Release|Any CPU.ActiveCfg = Release|Any CPU

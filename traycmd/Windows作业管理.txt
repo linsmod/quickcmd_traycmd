@@ -1,0 +1,45 @@
+有些程序在启动子进程但自己退出，我的程序要等待这种程序退出，普通方法就不好使了
+
+
+#include <windows.h>
+#include <iostream>
+
+int main() {
+    // 1. 创建作业对象
+    HANDLE hJob = CreateJobObject(NULL, NULL);
+    
+    // 2. 设置作业限制（关键：必须设置，否则子进程可能脱离作业）
+    JOBOBJECT_EXTENDED_LIMIT_INFORMATION jeli = {0};
+    jeli.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE | 
+                                            JOB_OBJECT_LIMIT_SILENT_BREAKAWAY_OK;
+    // SILENT_BREAKAWAY_OK 允许子进程脱离，但我们为了捕获所有子进程，建议设为 0
+    // 或者使用 SetInformationJobObject 配合阻止脱离
+    
+    // 更稳妥：不允许脱离作业
+    JOBOBJECT_BASIC_LIMIT_INFORMATION jobli = {0};
+    jobli.LimitFlags = JOB_OBJECT_LIMIT_BREAKAWAY_OK; // 不设置此项，默认不允许脱离
+    SetInformationJobObject(hJob, JobObjectBasicLimitInformation, &jobli, sizeof(jobli));
+
+    // 3. 创建启动器进程（挂起状态以便加入作业）
+    STARTUPINFOW si = { sizeof(si) };
+    PROCESS_INFORMATION pi;
+    CreateProcessW(L"launcher.exe", NULL, NULL, NULL, FALSE, 
+                   CREATE_SUSPENDED, NULL, NULL, &si, &pi);
+    
+    // 4. 将启动器进程分配进作业
+    AssignProcessToJobObject(hJob, pi.hProcess);
+    
+    // 5. 恢复进程运行
+    ResumeThread(pi.hThread);
+    CloseHandle(pi.hThread);
+    CloseHandle(pi.hProcess); // 句柄关闭不影响进程
+
+    // 6. ★★★ 等待作业对象：直到作业内进程数为 0 ★★★
+    // 注意：WaitForSingleObject 在作业为空时才会触发！
+    WaitForSingleObject(hJob, INFINITE);
+    
+    // 此时，启动器和它产生的所有孙进程均已退出
+    CloseHandle(hJob);
+    printf("所有进程均已退出\n");
+    return 0;
+}

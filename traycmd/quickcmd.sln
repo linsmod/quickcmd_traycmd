@@ -1,0 +1,37 @@
+﻿
+Microsoft Visual Studio Solution File, Format Version 12.00
+# Visual Studio Version 17
+VisualStudioVersion = 17.14.36811.4
+MinimumVisualStudioVersion = 10.0.40219.1
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "quickcmd", "quickcmd.csproj", "{E46B04FE-72D2-22BE-A7B0-B29DA9187B5D}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "quickcmd.app", "..\quick_run\quickcmd.app.csproj", "{A47DB0E0-17FE-4027-AFB7-DFE6E41DA538}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "HotKeyKit", "..\hotkey\HotKeyKit.csproj", "{4D4867FE-0B68-D89E-045E-7C05D18CFE17}"
+EndProject
+Global
+	GlobalSection(SolutionConfigurationPlatforms) = preSolution
+		Debug|Any CPU = Debug|Any CPU
+		Release|Any CPU = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(ProjectConfigurationPlatforms) = postSolution
+		{E46B04FE-72D2-22BE-A7B0-B29DA9187B5D}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{E46B04FE-72D2-22BE-A7B0-B29DA9187B5D}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{E46B04FE-72D2-22BE-A7B0-B29DA9187B5D}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{E46B04FE-72D2-22BE-A7B0-B29DA9187B5D}.Release|Any CPU.Build.0 = Release|Any CPU
+		{A47DB0E0-17FE-4027-AFB7-DFE6E41DA538}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{A47DB0E0-17FE-4027-AFB7-DFE6E41DA538}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{A47DB0E0-17FE-4027-AFB7-DFE6E41DA538}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{A47DB0E0-17FE-4027-AFB7-DFE6E41DA538}.Release|Any CPU.Build.0 = Release|Any CPU
+		{4D4867FE-0B68-D89E-045E-7C05D18CFE17}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{4D4867FE-0B68-D89E-045E-7C05D18CFE17}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{4D4867FE-0B68-D89E-045E-7C05D18CFE17}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{4D4867FE-0B68-D89E-045E-7C05D18CFE17}.Release|Any CPU.Build.0 = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(SolutionProperties) = preSolution
+		HideSolutionNode = FALSE
+	EndGlobalSection
+	GlobalSection(ExtensibilityGlobals) = postSolution
+		SolutionGuid = {5FEED6C4-950F-45A1-AAF5-DBF853850A17}
+	EndGlobalSection
+EndGlobal

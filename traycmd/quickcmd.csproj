@@ -1,0 +1,27 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <UseWindowsForms>true</UseWindowsForms>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>disable</Nullable>
+    <AssemblyName>quickcmd</AssemblyName>
+    <RootNamespace>QuickCmd</RootNamespace>
+    <Version>1.0.0</Version>
+    <ProduceReferenceAssembly>false</ProduceReferenceAssembly>
+    <SatelliteResourceLanguages>en</SatelliteResourceLanguages>
+    <RuntimeIdentifier>win-x64</RuntimeIdentifier>
+    <NuGetAudit>false</NuGetAudit>
+  </PropertyGroup>
+  <PropertyGroup>
+    <NuGetAudit>false</NuGetAudit>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- hotkey/ 是独立类库，单独编译，勿随本项目的默认 glob 卷入 -->
+    <Compile Remove="hotkey/**/*.cs" />
+    <ProjectReference Include="..\hotkey\HotKeyKit.csproj" />
+  </ItemGroup>
+
+</Project>

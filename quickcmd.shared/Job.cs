@@ -20,7 +20,14 @@ internal sealed class Job : IDisposable
 {
     public IntPtr Handle { get; private set; }
 
-    private Job(IntPtr h) => Handle = h;
+    // 作业实例序号：内核不向用户态暴露作业对象的数字 ID（实测 kernel32/kernelbase
+    // ordinal #793 "GetJobObjectInfo" 对匿名作业返回全零，拿不到 KMTID），由 qchost
+    // 在 Create 时按创建顺序分配 "job-<N>"，随 Job 对象走，与句柄值复用无关。
+    public string Id { get; private set; }
+
+    private static int _seq;
+
+    private Job(IntPtr h) { Handle = h; Id = "job-" + System.Threading.Interlocked.Increment(ref _seq); }
 
     // 创建匿名作业；失败返回 null（调用方退化回旧的 pid 树跟踪）
     public static Job Create()

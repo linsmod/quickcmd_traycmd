@@ -13,7 +13,8 @@ namespace QuickCmd;
 internal sealed class Instance
 {
     public CommandDef Cmd;
-    public int Pid;
+    public int Pid;           // 启动时的 root pid（内部用：进程对象/树匹配/置前通知）
+    public string Id;         // 对外实例 ID：JOB = "job-<数字>"，PID = root pid 字符串
     public Process Proc;      // root 进程；可能为 null（root 在跟踪接管前就退出了）
     public Job Job;           // 作业对象；null = 退化模式（只能按 pid 树跟踪）
     public IntPtr Hwnd = IntPtr.Zero;
@@ -42,16 +43,17 @@ internal static class WindowFinder
         }
         catch { }
 
-        // 2) 兜底：枚举作业内活跃 pid（作业模式，root 退出后依然准确；
-        //    某些情况下窗口不属于被启动的 pid，如 Windows Terminal），
-        //    或 pid 子孙树（退化模式）
+        // 2) 兜底：枚举作业内活跃 pid + 沿 ppid 归属链向下扩出的逃逸子孙（作业模式下，
+        //    root 退出后依然准确；商店 App Execution Alias / shell 代理拉起的进程不进作业，
+        //    但 ppid 仍记着作业内父进程），或 pid 子孙树（退化模式）
         HashSet<int> pids;
         try
         {
             if (inst.Job != null)
             {
-                pids = inst.Job.ActivePids();
-                pids.Add(inst.Pid); // root 刚退出时 pid 仍可能持有窗口
+                var seeds = inst.Job.ActivePids();
+                seeds.Add(inst.Pid); // root 刚退出时 pid 仍可能持有窗口
+                pids = Native.DescendantsOf(seeds);
             }
             else pids = Native.DescendantsAndSelf(inst.Pid);
         }
@@ -114,9 +116,15 @@ internal static class Manager
 
         foreach (var i in live)
         {
-            HashSet<int> set;
-            try { set = i.Job != null ? i.Job.ActivePids() : Native.DescendantsAndSelf(i.Pid); }
-            catch { set = new HashSet<int> { i.Pid }; }
+            HashSet<int> members, set;
+            try
+            {
+                members = i.Job != null ? i.Job.ActivePids() : new HashSet<int> { i.Pid };
+                var seeds = new HashSet<int>(members);
+                seeds.Add(i.Pid);
+                set = Native.DescendantsOf(seeds); // 作业成员/子孙 + ppid 链上的逃逸进程
+            }
+            catch { members = set = new HashSet<int> { i.Pid }; }
 
             var tree = new List<ProcNode>();
             foreach (var pid in set)
@@ -125,43 +133,69 @@ internal static class Manager
 
             result.Add(new InstanceInfo
             {
-                Id = i.Pid,
+                Id = i.Id,
                 Mode = ModeOf(i),
                 ShortId = i.Cmd.ShortId,
                 Title = i.Cmd.Title,
                 Proj = i.Cmd.Proj,
                 Started = i.Started,
-                RootExited = i.Job != null && !set.Contains(i.Pid),
+                RootExited = i.Job != null && !members.Contains(i.Pid),
                 Tree = tree,
             });
         }
         return result;
     }
 
-    // kill 定位：优先实例 ID（root pid）精确匹配；否则允许传树内任意子 pid——
-    // JOB 实例命中成员即定位到其作业（击杀整棵树），PID 实例命中子孙同理。
-    public static Instance FindInstance(int pid)
+    // kill/front 定位：JOB 实例用 "job-<数字>" 实例 ID 精确匹配；数字 key 按 root pid
+    // 精确匹配（兼容旧用法）；否则允许传树内任意子 pid——JOB 实例命中成员即定位到
+    // 其作业（击杀整棵树），PID 实例命中子孙同理。
+    public static Instance FindInstance(string key)
     {
+        key = (key ?? "").Trim();
+        if (key.Length == 0) return null;
         var live = Live();
-        foreach (var i in live) if (i.Pid == pid) return i;
-        foreach (var i in live)
+
+        if (key.StartsWith("job-", StringComparison.OrdinalIgnoreCase))
         {
-            try
+            foreach (var i in live)
+                if (string.Equals(i.Id, key, StringComparison.OrdinalIgnoreCase)) return i;
+        }
+
+        if (int.TryParse(key, out var pid))
+        {
+            foreach (var i in live) if (i.Pid == pid) return i;
+            foreach (var i in live)
             {
-                if (i.Job != null) { if (i.Job.ActivePids().Contains(pid)) return i; }
-                else if (Native.DescendantsAndSelf(i.Pid).Contains(pid)) return i;
+                try
+                {
+                    if (i.Job != null) { var s = i.Job.ActivePids(); s.Add(i.Pid); if (Native.DescendantsOf(s).Contains(pid)) return i; }
+                    else if (Native.DescendantsAndSelf(i.Pid).Contains(pid)) return i;
+                }
+                catch { }
             }
-            catch { }
         }
         return null;
     }
 
     // 实例是否仍存活：
     //   作业模式 → 作业内还有活跃进程即存活（即便 root/launcher 已退出，孙进程仍算数）；
+    //     作业空了但 ppid 归属链上还能追到子孙（商店别名/shell 代理拉起的逃逸进程，
+    //     如 bat 里 start 记事本）也算存活；
     //   退化模式（无作业）→ 沿用旧的 root pid 存活判断。
     private static bool IsAlive(Instance i)
     {
-        if (i.Job != null) return !i.Job.IsCompleted;
+        if (i.Job != null)
+        {
+            if (!i.Job.IsCompleted) return true;
+            try
+            {
+                var seeds = i.Job.ActivePids(); // 通常已空
+                seeds.Add(i.Pid);
+                var full = Native.DescendantsOf(seeds);
+                return full.Count > seeds.Count; // 有逃逸子孙挂着
+            }
+            catch { return false; }
+        }
 
         bool exited = false;
         try { exited = i.Proc != null && i.Proc.HasExited; }
@@ -197,9 +231,9 @@ internal static class Manager
     // 返回 false 时 error=="max" 表示已达实例上限（已自动置前现有实例）；
     // 成功时 mode 为实际生效的跟踪模式："JOB"（作业整树）或 "PID"（root pid 树，
     // 含 useJob=true 但作业不可用而退化时）
-    public static bool Start(CommandDef cmd, bool useJob, out string error, out int pid, out string mode)
+    public static bool Start(CommandDef cmd, bool useJob, out string error, out int pid, out string mode, out string id)
     {
-        error = ""; pid = 0; mode = "";
+        error = ""; pid = 0; mode = ""; id = "";
 
         var live = ForCommand(cmd.Id);
         if (live.Count >= Math.Max(1, cmd.MaxInstances))
@@ -213,11 +247,16 @@ internal static class Manager
         var res = Launcher.LaunchTracked(cmd, useJob, out var err);
         if (res == null) { error = err; return false; }
 
-        var inst = new Instance { Cmd = cmd, Pid = res.Pid, Proc = res.Proc, Job = res.Job };
+        var inst = new Instance
+        {
+            Cmd = cmd, Pid = res.Pid, Proc = res.Proc, Job = res.Job,
+            Id = res.Job != null ? res.Job.Id : res.Pid.ToString(),
+        };
         lock (Gate) Instances.Add(inst);
         pid = inst.Pid;
         mode = ModeOf(inst);
-        Notify("quickcmd", "已启动「" + cmd.Title + "」 [" + mode + "] pid=" + inst.Pid);
+        id = inst.Id;
+        Notify("quickcmd", "已启动「" + cmd.Title + "」 [" + mode + "] " + inst.Id);
 
         // 后台寻找窗口句柄（窗口可能要过一会儿才出现）
         var t = new Thread(() =>
@@ -267,12 +306,20 @@ internal static class Manager
             if (inst.Job != null)
             {
                 // 整树击杀：覆盖“launcher 已退出、孙进程还活着”的情况
+                var seeds = inst.Job.ActivePids();
+                seeds.Add(inst.Pid);
+                var escaped = Native.DescendantsOf(seeds); // 含作业成员与 ppid 链上的逃逸进程
                 inst.Job.TerminateAll();
+                foreach (var pid in escaped)
+                {
+                    if (seeds.Contains(pid)) continue; // 作业内的由 TerminateAll 处理
+                    try { Process.GetProcessById(pid).Kill(true); } catch { }
+                }
                 inst.ReleaseJob();
             }
             else if (inst.Proc != null && !inst.Proc.HasExited) inst.Proc.Kill(true);
             else Process.GetProcessById(inst.Pid).Kill(true);
-            Notify("quickcmd", "已结束「" + inst.Cmd.Title + "」 pid=" + inst.Pid);
+            Notify("quickcmd", "已结束「" + inst.Cmd.Title + "」 " + inst.Id);
         }
         catch (Exception ex) { Notify("quickcmd", "结束失败: " + ex.Message); }
         finally

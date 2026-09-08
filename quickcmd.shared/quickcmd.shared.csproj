@@ -18,4 +18,12 @@
     <InternalsVisibleTo Include="qcApp" />
   </ItemGroup>
 
+  <ItemGroup>
+    <!-- 配套 agent skill 文档：嵌入 shared.dll，CLI（skill / install-skill）与
+         托盘 app（安装 Agent Skill 菜单项）共用同一份资源 -->
+    <EmbeddedResource Include="..\traycmd\skills\traycmd\SKILL.md">
+      <LogicalName>skill.md</LogicalName>
+    </EmbeddedResource>
+  </ItemGroup>
+
 </Project>

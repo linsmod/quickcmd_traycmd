@@ -4,7 +4,7 @@
 
 | 角色 | 启动方式 | 职责 |
 |---|---|---|
-| qchost（托盘宿主） | 直接运行 `quick_run.exe`（无参数，单实例互斥） | 右键菜单点已注册命令运行；展开命令可看运行中的实例（置前 / 结束）；IPC 服务端 |
+| qchost（托盘宿主） | 直接运行 `quick_run.exe`（无参数，单实例互斥） | 托盘菜单第一级直接列出运行中的实例（结束 / 打开文件位置 / 打开工作目录）；命令面板（双击托盘 / 长按 Win）搜索并运行命令；IPC 服务端 |
 | CLI | `quickcmd.exe <verb> ...`（带参数） | 对菜单里的命令做增删改查（CRUD）+ run/ps/kill，供脚本 / AI agent 调用；`run`/`run-job` 在 qchost 未运行时自动拉起它 |
 
 数据落盘：`%APPDATA%\quickcmd\commands.jsonl`（每行一条命令定义，UTF-8 JSONL）。
@@ -45,20 +45,21 @@ dotnet publish -c Release -r win-x64 --self-contained false -p:PublishSingleFile
 ```
 qchost 托盘图标（左键或右键）
 └─ 菜单
-   ├─ ○ myapp > Dev Server  ← 点击 = 运行（JOB 模式，弹真实终端/exe 窗口，能看到输出）
-   │   └─ 展开（仅当有运行中实例；无实例的命令不给子菜单）
-   │       └─ [JOB] pid 12345 · 21:30:11 · 5 分钟   ← 点击 = 把该窗口置前
-   │           ├─ Proj: myapp · [JOB] pid 12345
-   │           ├─ Open work directory
-   │           ├─ Bring window to front
-   │           └─ Kill whole process tree (pid 12345)   ← [PID] 模式为 "Kill process"
-   ├─ （平铺渲染：命令标签为 "proj > title"，同项目相邻，不再套 proj 子菜单）
+   ├─ [JOB] myapp > Dev Server · job-2 · pid 12345,12346 · 5 分   ← 第一级 = 运行中的实例
+   │   ├─ 结束任务（整棵作业树）                              ← [PID] 模式为 "（进程树）"
+   │   ├─ 打开文件所在位置        ← 优先取运行进程主模块路径（含商店别名/逃逸子孙），回退注册脚本/绝对路径
+   │   └─ 打开工作目录
+   ├─ 暂无实例或已逃逸            ← 没有存活实例时的占位
    ├─ ─────────────
    ├─ 打开数据文件
    └─ 退出
 ```
 
-同一命令可多次运行（受 `--max-instances` 限制，默认 1）。已到上限再点击会置前现有实例。
+菜单只放实例，不再平铺命令列表（避免 命令→实例→操作 三层嵌套）：运行命令走命令面板（双击托盘图标 / 长按 Win），或 CLI `quickcmd run-job`。
+
+实例 ID 为字符串：`[JOB]` = `job-<N>`（qchost 按作业创建顺序分配的自增序号，见下），`[PID]` = root pid。标签里的 pid 列表是**当前查出来的活跃 pid**：JOB 成员 + 沿 ppid 归属链扩出的**逃逸子孙**（如 bat 里 `start` 商店记事本：真实进程经 shell 代理拉起不进作业，但 ppid 仍指着已退的 cmd，照样被跟踪/击杀）。root 已退时标 `root已退`。
+
+同一命令可多次运行（受 `--max-instances` 限制，默认 1）。已到上限时 qchost 会把现有实例置前并提示。
 
 实例标签前缀标明跟踪模式：`[JOB]` = 作业对象整树跟踪（托盘点击/run-job 的默认，判定与击杀最准）；`[PID]` = 仅按 root pid 进程树跟踪（`quickcmd run`）。
 
@@ -73,9 +74,10 @@ quickcmd update <short-id> [选项]
 quickcmd delete <short-id> [-y]
 quickcmd run <short-id>                   [PID] 模式运行：按 root pid 进程树跟踪
 quickcmd run-job <short-id>               [JOB] 模式运行：作业对象整树跟踪（推荐）
-quickcmd ps                               列出 qchost 跟踪中的实例（[JOB] 展示整棵进程树）
-quickcmd kill <实例ID>                     结束实例（[JOB] 杀整棵作业树；传树内任意子 pid 也会定位到其 job）
+quickcmd ps                               列出 qchost 跟踪中的实例（ID=job-<数字> 或 pid；[JOB] 展示整棵进程树）
+quickcmd kill <实例ID>                     结束实例（job-<数字> / root pid / 树内任意子 pid 均可；[JOB] 杀作业树+逃逸子孙）
 quickcmd path                             打印数据文件路径
+quickcmd skill                            显示配套 agent skill 文档（SKILL.md 构建时以嵌入资源随 exe 分发）
 quickcmd help
 ```
 
@@ -105,7 +107,9 @@ quickcmd help
 
 ## Agent 集成（配套 skill）
 
-已安装到 `~\.agents\skills\quickcmd\SKILL.md`（仓库副本在 `skills\quickcmd\`）。装了该 skill 的 agent（ZCode 等）在用户说"加到托盘 / 注册命令 / 以后一键运行"时会自动调用上述 CLI 完成注册。
+已安装到 `~\.agents\skills\traycmd\SKILL.md`（仓库副本在 `skills\traycmd\`）。装了该 skill 的 agent（ZCode 等）在用户说"加到托盘 / 注册命令 / 以后一键运行"时会自动调用上述 CLI 完成注册。
+
+SKILL.md 在构建时以嵌入资源（LogicalName `skill.md`）打进 `quickcmd.exe`，`quickcmd skill`（等价 `/skill`）可直接显示——exe 单独拷到任何机器都自带文档。
 
 ## 设计说明 / 已知边界
 
@@ -119,7 +123,7 @@ quickcmd help
   - qchost 托盘点击命令 / 命令面板运行 = 默认 [JOB] 模式。
 - Windows 11 默认终端为 Windows Terminal 时，窗口归属与 pid 分离；有作业时按作业内活跃 pid 枚举窗口，退化时按"pid 子孙树 + 窗口枚举"兜底定位。
 - **打包应用（MSIX）可能逃逸作业**：Win11 商店版 notepad 这类打包应用经 `cmd start`/ShellExecute 激活时由激活代理重新拉起，不在作业内（父 pid 显示不变但成员关系丢失），[JOB] 会如实判定实例已结束。用 `--program notepad.exe` 直接启动则正常。
-- `ps` / `kill` 只在 qchost 运行时有意义（实例存活于 qchost 进程内，这两个命令不自动拉起 qchost）：`ps` 每条实例的 ID = root pid（[JOB] 即作业标识，带 `*` = root 已退、靠作业续命），下方缩进树为真实进程树；`kill <ID>` 对 [JOB] 用 `TerminateJobObject` 击杀整棵树，传树内任意成员 pid 也会定位到其作业实例。
+- `ps` / `kill` 只在 qchost 运行时有意义（实例存活于 qchost 进程内，这两个命令不自动拉起 qchost）：`ps` 每条实例的 ID 为字符串——[JOB] = `job-<N>`（qchost 按作业创建顺序分配的序号；内核不向用户态暴露作业对象的数字 ID，实测 ordinal #793 `GetJobObjectInfo` 对匿名作业返回全零，拿不到 KMTID，见 `testdata/probe-jobid.ps1`），[PID] = root pid；带 `*` = root 已退、靠作业续命。下方缩进树为真实进程树（JOB 成员 + ppid 链上的逃逸子孙）；`kill <ID>` 对 [JOB] 先 `TerminateJobObject` 杀作业成员，再逐个 `Kill(true)` 补杀逃逸子孙，传树内任意成员 pid 也会定位到其作业实例。
 - `--command-text` 已被 `--program` + `--args` 取代；裸命令（`npm` 等 .cmd）直接启动找不到时会自动回退经 `cmd /k` 解析。
 - 默认保持窗口：python 用 `-i`（脚本跑完停在交互界面）、ps1 用 `-NoExit`、bat 用 `/k`；`--close-on-exit` 反之。
 - 数据文件手工损坏的行会被跳过，并在菜单/`list` 中提示行数。

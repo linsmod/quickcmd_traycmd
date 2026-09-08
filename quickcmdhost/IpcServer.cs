@@ -55,8 +55,8 @@ internal static class IpcServer
                     var c = Resolver.Resolve(msg.Key, list, out var err);
                     if (c == null) return Err(err);
                     bool useJob = !string.Equals(msg.Mode, "pid", StringComparison.OrdinalIgnoreCase);
-                    if (Manager.Start(c, useJob, out var serr, out var spid, out var smode))
-                        return Ok("[" + smode + "] 已启动 pid=" + spid);
+                    if (Manager.Start(c, useJob, out var serr, out var spid, out var smode, out var sid))
+                        return Ok("[" + smode + "] 已启动 " + sid + (smode == "JOB" ? "" : " pid=" + spid));
                     if (serr == "max")
                         return Ok("已达实例上限，已置前现有实例");
                     return Err(serr);
@@ -71,25 +71,19 @@ internal static class IpcServer
                     }, Store.JsonOpts);
 
                 case "kill":
-                    if (!int.TryParse((msg.Key ?? "").Trim(), out var kpid))
-                        return Err("kill 目标必须是 ps 里的实例 ID（pid），实际: " + msg.Key);
-                    var target = Manager.FindInstance(kpid);
-                    if (target == null) return Err("未找到实例 pid " + kpid + "（不在 qchost 跟踪的实例中）");
+                    var target = Manager.FindInstance(msg.Key);
+                    if (target == null) return Err("未找到实例 " + msg.Key + "（应为 ps 里的 ID：job-<数字> 或 pid，也可传树内任意 pid）");
                     var kmode = Manager.ModeOf(target);
-                    var kid = target.Pid;
                     var ktitle = target.Cmd.Title ?? "";
                     Manager.Kill(target);
-                    var via = kpid != kid ? "pid " + kpid + " 属于实例 " + kid + "，" : "";
-                    return Ok("[" + kmode + "] " + via + "已结束「" + ktitle + "」" +
+                    return Ok("[" + kmode + "] 已结束「" + ktitle + "」 " + target.Id +
                               (kmode == "JOB" ? "（整棵作业树）" : "（pid 进程树）"));
 
                 case "front":
-                    if (!int.TryParse((msg.Key ?? "").Trim(), out var fpid))
-                        return Err("front 目标必须是实例 ID（pid）");
-                    var inst = Manager.FindInstance(fpid);
-                    if (inst == null) return Err("未找到实例 pid " + fpid);
+                    var inst = Manager.FindInstance(msg.Key);
+                    if (inst == null) return Err("未找到实例 " + msg.Key);
                     Manager.BringFront(inst);
-                    return Ok("[" + Manager.ModeOf(inst) + "] 已置前「" + (inst.Cmd.Title ?? "") + "」 pid=" + inst.Pid);
+                    return Ok("[" + Manager.ModeOf(inst) + "] 已置前「" + (inst.Cmd.Title ?? "") + "」 " + inst.Id);
 
                 case "shutdown":
                     shutdown = true;

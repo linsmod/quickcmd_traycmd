@@ -3,6 +3,7 @@
 // ============================================================================
 
 using System.Diagnostics;
+using System.Text;
 using System.Text.Json;
 
 namespace QuickCmd;
@@ -38,6 +39,8 @@ internal static class CliApp
             case "run-job": return CmdRun(rest, useJob: true);
             case "ps": return CmdPs(rest);
             case "kill": return CmdKill(rest);
+            case "skill": case "/skill": return CmdSkill();
+            case "install-skill": case "/install-skill": return CmdInstallSkill(rest);
             case "path": Console.WriteLine(Store.FilePath); return 0;
             case "help": case "-h": case "--help": Help(); return 0;
             default:
@@ -371,13 +374,13 @@ internal static class CliApp
             : JsonSerializer.Deserialize<List<InstanceInfo>>(gr.Data, Store.JsonOpts);
         if (list == null || list.Count == 0) { Console.WriteLine("（没有运行中的实例）"); return 0; }
 
-        Console.WriteLine("ID         MODE   启动        运行时长    SHORT      命令");
+        Console.WriteLine("ID              MODE   启动        运行时长    SHORT      命令");
         foreach (var inst in list.OrderBy(x => x.Started))
         {
             var span = DateTime.Now - inst.Started;
             var dur = span.TotalMinutes < 1 ? (int)span.TotalSeconds + " 秒" : (long)span.TotalMinutes + " 分";
             Console.WriteLine(
-                (inst.Id.ToString() + (inst.RootExited ? "*" : "")).PadRight(12)
+                (inst.Id + (inst.RootExited ? "*" : "")).PadRight(16)
                 + ("[" + inst.Mode + "]").PadRight(7)
                 + inst.Started.ToString("HH:mm:ss").PadRight(12)
                 + dur.PadRight(12)
@@ -389,23 +392,24 @@ internal static class CliApp
         return 0;
     }
 
-    // 进程树（JOB 成员 / pid 子孙），按 ppid 组林；实例 ID 所在节点排最前并标注
+    // 进程树（JOB 成员 / pid 子孙），按 ppid 组林；root pid 所在节点标注
     private static void PrintProcTree(InstanceInfo inst)
     {
         var tree = inst.Tree ?? new List<ProcNode>();
         if (tree.Count == 0) { Console.WriteLine("    （当前无可见的活跃进程）"); return; }
 
+        int root = int.TryParse(inst.Id, out var r) ? r : -1;
         var set = new HashSet<int>(tree.Select(n => n.Pid));
         var kids = tree.GroupBy(n => n.Ppid)
             .ToDictionary(g => g.Key, g => g.Where(n => set.Contains(n.Pid) && n.Pid != n.Ppid).OrderBy(n => n.Pid).ToList());
         var roots = tree.Where(n => !set.Contains(n.Ppid))
-            .OrderBy(n => n.Pid == inst.Id ? 0 : 1).ThenBy(n => n.Pid).ToList();
+            .OrderBy(n => n.Pid == root ? 0 : 1).ThenBy(n => n.Pid).ToList();
 
         foreach (var rn in roots) Walk(rn, "    ", 0, true);
 
         void Walk(ProcNode n, string indent, int depth, bool last)
         {
-            var mark = n.Pid == inst.Id ? "   <- 实例ID" : "";
+            var mark = n.Pid == root ? (inst.Mode == "JOB" ? "   <- root pid" : "   <- 实例ID") : "";
             Console.WriteLine(indent + (depth == 0 ? "" : last ? "└─ " : "├─ ") + n.Pid + "  " + n.Name + mark);
             var ch = kids.TryGetValue(n.Pid, out var l) ? l : new List<ProcNode>();
             var childIndent = indent + (depth == 0 ? "  " : last ? "   " : "│  ");
@@ -419,7 +423,7 @@ internal static class CliApp
         var t = o.Positional.FirstOrDefault();
         if (string.IsNullOrWhiteSpace(t))
         {
-            Console.WriteLine("用法: quickcmd kill <实例ID(pid)>   先用 quickcmd ps 查看");
+            Console.WriteLine("用法: quickcmd kill <实例ID>   ID 取自 quickcmd ps（job-<数字> 或 pid）");
             return 2;
         }
         int r = TryQchostCall(new IpcMessage { Op = "kill", Key = t }, 800, out var gr);
@@ -427,6 +431,42 @@ internal static class CliApp
         if (r == 1) return 1;
         Console.WriteLine((gr != null && gr.Ok ? "OK: " : "错误: ") + (gr?.Message ?? "(无响应)"));
         return gr != null && gr.Ok ? 0 : 1;
+    }
+
+    // 显示配套 agent skill 文档（嵌入在 quickcmd.shared.dll，资源名 skill.md）
+    private static int CmdSkill()
+    {
+        var text = SkillResource.LoadText();
+        if (text == null) { Console.WriteLine("错误: 此可执行文件内未嵌入 skill.md"); return 1; }
+        Console.Write(text);
+        return 0;
+    }
+
+    // 安装 skill 文档到 ~/.agents/skills/traycmd/SKILL.md；-y 覆盖已存在
+    private static int CmdInstallSkill(string[] a)
+    {
+        var o = Parse(a);
+        var unknown = o.Map.Keys.Where(k => k != "yes").ToList();
+        if (unknown.Count > 0)
+        {
+            Console.WriteLine("错误: 未知选项 --" + string.Join(" --", unknown));
+            return 2;
+        }
+
+        bool overwrite = o.Has("yes");
+        Console.WriteLine("目标: " + SkillResource.TargetFile);
+        if (!overwrite && SkillResource.Exists())
+        {
+            Console.WriteLine("（文件已存在。用 -y 覆盖，或先到目录确认版本）");
+            return 3;
+        }
+        if (SkillResource.Install(overwrite, out var err))
+        {
+            Console.WriteLine((overwrite && SkillResource.Exists() ? "已覆盖: " : "已安装: ") + SkillResource.TargetFile);
+            return 0;
+        }
+        Console.WriteLine("错误: " + err);
+        return 1;
     }
 
     // 拉起 qchost（与 quickcmd 同目录优先，其次交给系统搜索）
@@ -482,8 +522,10 @@ qchost（quick command host）= 常驻托盘的宿主进程 qchost.exe：负责�
   quickcmd delete <short-id|id|title> [-y]
   quickcmd run <short-id|id|title>         以 [PID] 模式运行（按 root pid 进程树跟踪）
   quickcmd run-job <short-id|id|title>     以 [JOB] 模式运行（作业对象整树跟踪，推荐）
-  quickcmd ps                              列出 qchost 正在跟踪的实例（[JOB] 展示整棵进程树）
-  quickcmd kill <实例ID>                    结束实例：ID 取自 ps（[JOB] 杀整棵作业树，传树内任意 pid 也可定位到其 job）
+  quickcmd ps                              列出 qchost 正在跟踪的实例（ID=job-<数字> 或 root pid）
+  quickcmd kill <实例ID>                    结束实例：ID 取自 ps（[JOB] 杀整棵作业树+逃逸子孙，传树内任意 pid 也可定位）
+  quickcmd skill                           显示配套 agent skill 文档（嵌入在本程序内）
+  quickcmd install-skill [-y]              安装 skill 到 ~\.agents\skills\traycmd\（已存在时需 -y 覆盖）
   quickcmd path
 
 add / update 选项:
@@ -514,8 +556,10 @@ add / update 选项:
   - run / run-job 把请求交给常驻 qchost（实例可跟踪管理，托盘菜单中以 [PID]/[JOB] 标注模式）；
      qchost 未运行时自动拉起 qchost.exe 再执行；找不到/拉不起 qchost 才退回直接启动（不跟踪）
    - 手动启动 qchost：直接运行 qchost.exe（无参数，单实例互斥）
-  - [JOB] 模式用 Windows 作业对象跟踪整棵进程树：launcher 自退后孙进程仍算存活，
-    Kill 击杀整树，判定最准；[PID] 模式仅按 root pid 及其子孙树跟踪（root 提前退出会误判结束）
+   - [JOB] 模式用 Windows 作业对象跟踪整棵进程树：launcher 自退后孙进程仍算存活，
+     作业成员之外沿 ppid 归属链扩出的逃逸子孙（如 bat 里 start 商店记事本）也被跟踪并补杀；
+     实例 ID = job-<N>（qchost 按作业创建顺序分配的自增序号，非 pid），Kill 击杀整树，判定最准；
+     [PID] 模式仅按 root pid 及其子孙树跟踪（root 提前退出会误判结束）
   - ps / kill 只在 qchost 运行时有意义（实例存活于 qchost 进程内），qchost 不在时 ps 提示为空、kill 报错
 """);
     }

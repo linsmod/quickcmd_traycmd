@@ -90,6 +90,10 @@ internal static class Native
     [DllImport("kernel32.dll", SetLastError = true)]
     public static extern bool QueryInformationJobObject(IntPtr hJob, int jobObjectInfoClass, IntPtr lpJobObjectInfo, uint cbJobObjectInfoLength, out uint lpReturnLength);
 
+    // 注：曾尝试 kernel32/kernelbase ordinal #793（"GetJobObjectInfo"）取作业 KMTID，
+    // 实测对新建匿名作业返回全零结构，拿不到对象 ID——作业序号改由 Job.Create 自增分配。
+    // 验证脚本：traycmd/testdata/probe-jobid.ps1
+
     public const uint CREATE_SUSPENDED = 0x00000004;
     public const uint CREATE_UNICODE_ENVIRONMENT = 0x00000400;
     public const int JobObjectBasicProcessIdListInformation = 3;
@@ -140,9 +144,13 @@ internal static class Native
     }
 
     // 返回 rootPid 及其全部子孙 pid（用于跨 Windows Terminal 归属窗口、整树杀进程）
-    public static HashSet<int> DescendantsAndSelf(int rootPid)
+    public static HashSet<int> DescendantsAndSelf(int rootPid) => DescendantsOf(new[] { rootPid });
+
+    // 多种子版：rootPid + 作业成员等一起向下扩。子进程即使父进程已退出，ppid 归属
+    // 仍留在进程快照里，因此能追到"launcher 自退后经 shell/商店别名代理拉起"的逃逸进程
+    public static HashSet<int> DescendantsOf(IEnumerable<int> seeds)
     {
-        var result = new HashSet<int> { rootPid };
+        var result = new HashSet<int>(seeds);
         var parentToChild = new Dictionary<int, List<int>>();
         var h = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
         if (h == IntPtr.Zero || h == (IntPtr)(-1)) return result;
@@ -162,8 +170,7 @@ internal static class Native
         }
         finally { CloseHandle(h); }
 
-        var queue = new Queue<int>();
-        queue.Enqueue(rootPid);
+        var queue = new Queue<int>(result);
         while (queue.Count > 0)
         {
             var cur = queue.Dequeue();

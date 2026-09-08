@@ -41,7 +41,7 @@ internal sealed class CommandDef
 internal sealed class IpcMessage
 {
     public string Op { get; set; }   // ping | run | kill | ps | reload
-    public string Key { get; set; }  // run: short-id/id/title；kill: 实例 ID（pid）
+    public string Key { get; set; }  // run: short-id/id/title；kill/front: 实例 ID（job-<数字> 或 pid，也接受树内任意 pid）
     public string Mode { get; set; } // run 跟踪模式: "job" | "pid"（空 = job）
 }
 
@@ -53,11 +53,12 @@ internal sealed class QchostResponse
     public string Data { get; set; } // 可选 JSON 负载（ps 的实例快照）
 }
 
-// ps 快照：一条运行实例。Id = 实例 ID（root pid；JOB 模式下即该作业的 ID，
-// kill 用它定位，杀掉的是整棵作业树而不止这个 pid）
+// ps 快照：一条运行实例。Id = 实例 ID（字符串：JOB = "job-<N>"（qchost 按作业创建
+// 顺序分配的自增序号，随 Job 对象走），PID = root pid），kill/front 用它定位；
+// JOB 模式杀整棵作业树，root pid 提前退出也不影响（存活以 Tree 里的作业成员/逃逸子孙为准）
 internal sealed class InstanceInfo
 {
-    public int Id { get; set; }
+    public string Id { get; set; }
     public string Mode { get; set; }      // JOB | PID
     public string ShortId { get; set; }   // 所属命令定义 short id
     public string Title { get; set; }

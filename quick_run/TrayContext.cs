@@ -116,14 +116,9 @@ public sealed class TrayContext : ApplicationContext
         if (r == 2) _hostUp = false;
     }
 
-    private void BringFront(int pid)
+    private void KillInstance(string id)
     {
-        if (Call(new IpcMessage { Op = "front", Key = pid.ToString() }, 3000, out _) != 0) _hostUp = false;
-    }
-
-    private void KillInstance(int pid)
-    {
-        if (Call(new IpcMessage { Op = "kill", Key = pid.ToString() }, 3000, out _) != 0) _hostUp = false;
+        if (Call(new IpcMessage { Op = "kill", Key = id }, 3000, out _) != 0) _hostUp = false;
     }
 
     public void ShowCommandPalette()
@@ -162,16 +157,10 @@ public sealed class TrayContext : ApplicationContext
     {
         var list = Store.Load(out var bad);
         var snap = _hostUp ? Snapshot() : new List<InstanceInfo>();
-        var byCmd = new Dictionary<string, List<InstanceInfo>>();
-        foreach (var i in snap)
-        {
-            var key = i.ShortId ?? "";
-            if (!byCmd.TryGetValue(key, out var l)) byCmd[key] = l = new List<InstanceInfo>();
-            l.Add(i);
-        }
 
         _menu.Items.Clear();
-        _menu.Items.Add(new ToolStripMenuItem("quickcmd · " + list.Count + " 条命令") { Enabled = false });
+        _menu.Items.Add(new ToolStripMenuItem("quickcmd"
+            + (_hostUp ? " · " + snap.Count + " 个实例" : "")) { Enabled = false });
         if (!_hostUp)
         {
             var retry = new ToolStripMenuItem("⚠ qchost 未连接（点击重连）");
@@ -185,17 +174,15 @@ public sealed class TrayContext : ApplicationContext
             _menu.Items.Add(new ToolStripMenuItem("⚠ 数据文件有 " + bad + " 行无法解析") { Enabled = false });
         _menu.Items.Add(new ToolStripSeparator());
 
-        if (list.Count == 0)
+        // 第一级 = 运行中的实例（运行命令走命令面板：双击托盘 / 长按 Win）。
+        // 菜单不再平铺命令列表，避免 命令→实例→操作 三层嵌套。
+        if (_hostUp)
         {
-            _menu.Items.Add(new ToolStripMenuItem("（暂无命令，用 quickcmd add 注册）") { Enabled = false });
-        }
-        else
-        {
-            // 平铺渲染（与命令面板一致）：命令项标签本身为 "proj > title"，同项目按 proj 排序自然相邻
-            var ordered = list
-                .OrderBy(c => (c.Proj ?? "").Trim(), StringComparer.OrdinalIgnoreCase)
-                .ThenBy(c => c.Title, StringComparer.OrdinalIgnoreCase);
-            foreach (var c in ordered) _menu.Items.Add(BuildCommandItem(c, byCmd));
+            if (snap.Count == 0)
+                _menu.Items.Add(new ToolStripMenuItem("暂无实例或已逃逸") { Enabled = false });
+            else
+                foreach (var i in snap.OrderBy(x => x.Started))
+                    _menu.Items.Add(BuildInstanceItem(i, list));
         }
 
         _menu.Items.Add(new ToolStripSeparator());
@@ -213,6 +200,11 @@ public sealed class TrayContext : ApplicationContext
         };
         _menu.Items.Add(dataItem);
 
+        var skillItem = new ToolStripMenuItem(SkillResource.Available() ? "安装 Agent Skill" : "安装 Agent Skill（不可用）");
+        skillItem.Enabled = SkillResource.Available();
+        skillItem.Click += (s, e) => InstallSkillFromMenu();
+        _menu.Items.Add(skillItem);
+
         var startupItem = new ToolStripMenuItem("开机启动")
         {
             CheckOnClick = true,
@@ -226,62 +218,83 @@ public sealed class TrayContext : ApplicationContext
         _menu.Items.Add(exitItem);
     }
 
-    // 命令项：点击 = 运行（IPC→qchost，JOB 模式）；有运行中实例时展开直接显示实例
-    private ToolStripMenuItem BuildCommandItem(CommandDef c, Dictionary<string, List<InstanceInfo>> byCmd)
+    // 托盘"安装 Agent Skill"：把嵌入资源写到 ~/.agents/skills/traycmd/SKILL.md
+    // 已存在时弹框确认覆盖（等价 CLI 的 -y）
+    private void InstallSkillFromMenu()
     {
-        var insts = byCmd.TryGetValue(c.ShortId, out var l) ? l : new List<InstanceInfo>();
-        var projPrefix = string.IsNullOrWhiteSpace(c.Proj) ? "" : c.Proj.Trim() + " > ";
-        var label = (insts.Count > 0 ? "● " : "○ ") + projPrefix + c.Title
-                    + (insts.Count > 0 ? "  [" + insts.Count + "/" + c.MaxInstances + "]" : "");
-        var item = new ToolStripMenuItem(label);
-        item.Click += (s, e) => RunCommand(c);
-
-        // 提取并设置图标（使用缓存）
-        if (!_iconCache.TryGetValue(c.Id, out var icon))
+        bool overwrite = true;
+        if (SkillResource.Exists())
         {
-            icon = IconExtractor.GetIcon(c);
-            if (icon != null)
-                _iconCache[c.Id] = icon;
+            var r = MessageBox.Show(
+                "已存在：\n" + SkillResource.TargetFile +
+                "\n\n要覆盖吗？（取消 = 保留现有文件）",
+                "安装 Agent Skill", MessageBoxButtons.YesNoCancel, MessageBoxIcon.Question);
+            if (r == DialogResult.Cancel) return;
+            overwrite = r == DialogResult.Yes;
         }
-
-        if (icon != null)
+        if (!overwrite)
         {
-            item.Image = icon.ToBitmap();
+            MessageBox.Show("已保留现有文件，未改动。", "安装 Agent Skill",
+                MessageBoxButtons.OK, MessageBoxIcon.Information);
+            return;
         }
-
-        if (insts.Count > 0)
-        {
-            foreach (var i in insts) item.DropDownItems.Add(BuildInstanceItem(i, c));
-            if (insts.Count > 1)
-            {
-                var killAll = new ToolStripMenuItem("结束全部实例");
-                killAll.Click += (s, e) =>
-                {
-                    foreach (var i in insts) KillInstance(i.Id);
-                };
-                item.DropDownItems.Add(killAll);
-            }
-        }
-        return item;
+        var ok = SkillResource.Install(true, out var err);
+        MessageBox.Show(ok ? "已安装：\n" + SkillResource.TargetFile : "安装失败：" + err,
+            "安装 Agent Skill", MessageBoxButtons.OK,
+            ok ? MessageBoxIcon.Information : MessageBoxIcon.Warning);
     }
 
-    // 实例项：点击 = 置前；展开 = Proj name / Open workdir / Bring front / Kill
-    private ToolStripMenuItem BuildInstanceItem(InstanceInfo i, CommandDef cmd)
+    // 实例项（第一级）：前缀直接是实例 ID —— JOB = "[job-N]"，PID = "[pid]"；
+    // 后跟**当前活跃 pid**（root 启动 pid 可能已退）· 时长 · root已退标记；
+    // 展开 = 结束任务 / 打开文件所在位置 / 打开工作目录
+    private ToolStripMenuItem BuildInstanceItem(InstanceInfo i, List<CommandDef> defs)
     {
-        var mins = (long)(DateTime.Now - i.Started).TotalMinutes;
-        var dur = mins < 1 ? "刚刚" : mins + " 分钟";
-        var item = new ToolStripMenuItem("[" + i.Mode + "] pid " + i.Id + " · " + i.Started.ToString("HH:mm:ss") + " · " + dur
-            + (i.RootExited ? " · root 已退" : ""));
-        item.Click += (s, e) => BringFront(i.Id);
+        var cmd = defs.FirstOrDefault(d => string.Equals(d.ShortId, i.ShortId, StringComparison.OrdinalIgnoreCase));
+        int rootPid = int.TryParse(i.Id, out var rp) ? rp : -1;
 
-        var info = new ToolStripMenuItem(
-            "Proj: " + (string.IsNullOrWhiteSpace(cmd.Proj) ? "(未设置)" : cmd.Proj)
-            + " · [" + i.Mode + "] pid " + i.Id)
-        { Enabled = false };
-        item.DropDownItems.Add(info);
+        var livePids = (i.Tree ?? new List<ProcNode>()).Select(n => n.Pid).Distinct()
+            .OrderBy(p => p == rootPid ? 0 : 1).ThenBy(p => p).ToList();
+        var pidList = "pid " + string.Join(",", livePids.Take(4)) + (livePids.Count > 4 ? "…" : "");
 
-        var open = new ToolStripMenuItem("Open work directory");
-        open.Click += (s, e) =>
+        var span = DateTime.Now - i.Started;
+        var dur = span.TotalMinutes < 1 ? "刚刚" : span.TotalHours < 1 ? (long)span.TotalMinutes + " 分" : (long)span.TotalHours + " 小时";
+        var projPrefix = string.IsNullOrWhiteSpace(i.Proj) ? "" : i.Proj.Trim() + " > ";
+        var isJob = i.Mode == "JOB";
+        var label = (isJob ? "[" + i.Id + "] " : "[pid] ") + projPrefix + i.Title
+            + " · " + (livePids.Count > 0 ? pidList : isJob ? "无活跃pid" : "pid " + i.Id + " 已退");
+        if (i.RootExited) label += " · root已退";
+        var item = new ToolStripMenuItem(label + " · " + dur);
+
+        if (cmd != null)
+        {
+            if (!_iconCache.TryGetValue(cmd.Id, out var icon))
+            {
+                icon = IconExtractor.GetIcon(cmd);
+                if (icon != null) _iconCache[cmd.Id] = icon;
+            }
+            if (icon != null) item.Image = icon.ToBitmap();
+        }
+
+        var kill = new ToolStripMenuItem("结束任务" + (i.Mode == "JOB" ? "（整棵作业树）" : "（进程树）"));
+        kill.Click += (s, e) => KillInstance(i.Id);
+        item.DropDownItems.Add(kill);
+
+        var fileItem = new ToolStripMenuItem("打开文件所在位置");
+        var filePath = ResolveTargetFile(i, cmd);
+        if (filePath == null) fileItem.Enabled = false;
+        else fileItem.Click += (s, e) =>
+        {
+            try
+            {
+                Process.Start(new ProcessStartInfo("explorer.exe", "/select,\"" + filePath + "\"") { UseShellExecute = true });
+            }
+            catch { }
+        };
+        item.DropDownItems.Add(fileItem);
+
+        var dirItem = new ToolStripMenuItem("打开工作目录");
+        if (cmd == null) dirItem.Enabled = false;
+        else dirItem.Click += (s, e) =>
         {
             var dir = Launcher.EffectiveWorkdir(cmd);
             try
@@ -291,18 +304,46 @@ public sealed class TrayContext : ApplicationContext
             }
             catch { }
         };
-        item.DropDownItems.Add(open);
-
-        var front = new ToolStripMenuItem("Bring window to front");
-        front.Click += (s, e) => BringFront(i.Id);
-        item.DropDownItems.Add(front);
-
-        var kill = new ToolStripMenuItem(
-            (i.Mode == "JOB" ? "Kill whole process tree" : "Kill process") + " (pid " + i.Id + ")");
-        kill.Click += (s, e) => KillInstance(i.Id);
-        item.DropDownItems.Add(kill);
+        item.DropDownItems.Add(dirItem);
 
         return item;
+    }
+
+    // 实例的目标文件（任务管理器"打开文件所在位置"语义）：优先运行中进程的主模块路径，
+    // root/树内 pid 逐个试（商店记事本的 root 就是 WindowsApps 下真实 exe；经 shell
+    // 代理逃逸的孙进程也在树里）；全都拿不到再退回注册的脚本文件 / 绝对路径程序
+    private static string ResolveTargetFile(InstanceInfo i, CommandDef cmd)
+    {
+        int root = int.TryParse(i.Id, out var r) ? r : -1;
+        var pids = (i.Tree ?? new List<ProcNode>()).Select(n => n.Pid).Distinct()
+            .OrderBy(p => p == root ? 0 : 1).ThenBy(p => p).ToList();
+        if (root > 0 && !pids.Contains(root)) pids.Insert(0, root);
+
+        foreach (var pid in pids)
+        {
+            try
+            {
+                using var p = Process.GetProcessById(pid);
+                var path = p.MainModule?.FileName;
+                if (!string.IsNullOrWhiteSpace(path) && File.Exists(path)) return path;
+            }
+            catch { }
+        }
+
+        if (cmd != null)
+        {
+            if (!string.IsNullOrWhiteSpace(cmd.ShellScript))
+            {
+                var script = Launcher.Expand(cmd.ShellScript.Trim());
+                if (File.Exists(script)) return script;
+            }
+            if (!string.IsNullOrWhiteSpace(cmd.Program))
+            {
+                var prog = Launcher.Expand(cmd.Program.Trim());
+                if (Path.IsPathRooted(prog) && File.Exists(prog)) return prog;
+            }
+        }
+        return null;
     }
 
     // ----- 退出 -----

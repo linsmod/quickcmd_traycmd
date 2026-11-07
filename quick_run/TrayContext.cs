@@ -109,10 +109,17 @@ public sealed class TrayContext : ApplicationContext
 
     // ----- 动作（全部发给 qchost 执行）-----
 
-    // 托盘/面板点击运行：默认 JOB 模式（整树跟踪）
+    // 托盘/面板点击运行：默认 JOB 模式（整树跟踪）；Source 只用于审计
     private void RunCommand(CommandDef c)
     {
-        int r = Call(new IpcMessage { Op = "run", Key = c.Id, Mode = "job" }, 3000, out _);
+        int r = Call(new IpcMessage
+        {
+            Op = "run",
+            Key = c.Id,
+            Mode = "job",
+            Source = "palette",
+            RequesterPid = Environment.ProcessId,
+        }, 3000, out _);
         if (r == 2) _hostUp = false;
     }
 
@@ -199,6 +206,49 @@ public sealed class TrayContext : ApplicationContext
             catch { }
         };
         _menu.Items.Add(dataItem);
+
+        // 执行审计：最近 8 条 + 打开/清空历史文件
+        var histItem = new ToolStripMenuItem("历史记录");
+        var entries = History.Read(8, null, out _);
+        if (entries.Count == 0)
+            histItem.DropDownItems.Add(new ToolStripMenuItem("（暂无执行历史）") { Enabled = false });
+        else
+            foreach (var e in entries.AsEnumerable().Reverse())
+            {
+                var status = History.StatusText(e.Status)
+                    + (e.ExitCode != int.MinValue ? "(" + e.ExitCode + ")" : "");
+                var mi = new ToolStripMenuItem(
+                    e.Timestamp.ToString("MM-dd HH:mm") + "  " + status + "  " + Trunc(e.CommandLine, 46))
+                {
+                    Enabled = false,
+                    ToolTipText = e.CommandLine,
+                };
+                histItem.DropDownItems.Add(mi);
+            }
+        histItem.DropDownItems.Add(new ToolStripSeparator());
+        var openHist = new ToolStripMenuItem("打开历史文件");
+        openHist.Click += (s, e) =>
+        {
+            try
+            {
+                Process.Start(new ProcessStartInfo("notepad.exe", "\"" + History.FilePath + "\"")
+                {
+                    UseShellExecute = true,
+                });
+            }
+            catch { }
+        };
+        histItem.DropDownItems.Add(openHist);
+        var clearHist = new ToolStripMenuItem("清空历史…");
+        clearHist.Click += (s, e) =>
+        {
+            var r = MessageBox.Show(
+                "清空所有执行审计记录？\n" + History.FilePath,
+                "quickcmd", MessageBoxButtons.YesNo, MessageBoxIcon.Warning);
+            if (r == DialogResult.Yes) History.Clear(out _);
+        };
+        histItem.DropDownItems.Add(clearHist);
+        _menu.Items.Add(histItem);
 
         var skillItem = new ToolStripMenuItem(SkillResource.Available() ? "安装 Agent Skill" : "安装 Agent Skill（不可用）");
         skillItem.Enabled = SkillResource.Available();
@@ -356,6 +406,12 @@ public sealed class TrayContext : ApplicationContext
         _ni.Dispose();
         _menu.Dispose();
         ExitThread();
+    }
+
+    private static string Trunc(string s, int n)
+    {
+        s = s ?? "";
+        return s.Length <= n ? s : s.Substring(0, Math.Max(1, n - 1)) + "…";
     }
 
     private static Icon MakeIcon()

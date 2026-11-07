@@ -20,6 +20,10 @@ internal sealed class Instance
     public IntPtr Hwnd = IntPtr.Zero;
     public DateTime Started = DateTime.Now;
     public bool Dead;
+    public bool Killed;       // 用户主动结束 → finish 事件记 killed（否则 exited）
+    public int ExitCode = int.MinValue; // root 退出码（拿不到保持 MinValue）
+    public int RequesterPid;  // 发起这次执行的 CLI/托盘进程（审计 finish 也带上）
+    public string ModeName;   // 创建时的跟踪模式快照（kill 会先释放 Job，事后取会误判成 PID）
 
     public void ReleaseJob()
     {
@@ -218,6 +222,8 @@ internal static class Manager
                 if (!IsAlive(i))
                 {
                     i.Dead = true;
+                    CaptureExitCode(i);
+                    AppendFinish(i, i.Killed ? "killed" : "exited");
                     i.ReleaseJob(); // 作业已空，关闭句柄
                 }
             }
@@ -225,13 +231,57 @@ internal static class Manager
         }
     }
 
-    // 实例跟踪模式：Job 句柄非空 = JOB（作业对象整树跟踪），否则 = PID（root pid 树跟踪）
-    public static string ModeOf(Instance i) => i.Job != null ? "JOB" : "PID";
+    // root 退出码：作业模式用保留下来的进程句柄（root 早退也拿得到），
+    // 退化模式退回 Process.ExitCode
+    private static void CaptureExitCode(Instance i)
+    {
+        try
+        {
+            if (i.Job != null && i.Job.RootProcessHandle != IntPtr.Zero
+                && Native.GetExitCodeProcess(i.Job.RootProcessHandle, out var code))
+                i.ExitCode = unchecked((int)code);
+            else if (i.Proc != null && i.Proc.HasExited)
+                i.ExitCode = i.Proc.ExitCode;
+        }
+        catch { }
+    }
+
+    // 审计收尾：一次执行在历史里留下 start + finish 两条（ExecId 关联）
+    private static void AppendFinish(Instance i, string status)
+    {
+        try
+        {
+            History.Append(new HistoryEntry
+            {
+                Event = "finish",
+                Kind = i.Cmd != null && i.Cmd.Id.StartsWith("adhoc-", StringComparison.OrdinalIgnoreCase) ? "exec" : "run",
+                Source = "qchost",
+                ExecId = i.Cmd?.Id ?? "",
+                Title = i.Cmd?.Title ?? "",
+                ShortId = i.Cmd?.ShortId ?? "",
+                CommandLine = History.CommandLineOf(i.Cmd),
+                Workdir = i.Cmd != null ? Launcher.EffectiveWorkdir(i.Cmd) : "",
+                Mode = ModeOf(i),
+                InstanceId = i.Id,
+                Pid = i.Pid,
+                Status = status,
+                ExitCode = i.ExitCode,
+                DurationMs = (long)Math.Max(0, (DateTime.Now - i.Started).TotalMilliseconds),
+                RequesterPid = i.RequesterPid,
+            }, out _);
+        }
+        catch { }
+    }
+
+    // 实例跟踪模式：Job 句柄非空 = JOB（作业对象整树跟踪），否则 = PID（root pid 树跟踪）。
+    // 用创建时快照：kill/Prune 会先释放 Job，事后按句柄判断会把已结束的 JOB 记成 PID。
+    public static string ModeOf(Instance i) =>
+        !string.IsNullOrEmpty(i.ModeName) ? i.ModeName : (i.Job != null ? "JOB" : "PID");
 
     // 返回 false 时 error=="max" 表示已达实例上限（已自动置前现有实例）；
     // 成功时 mode 为实际生效的跟踪模式："JOB"（作业整树）或 "PID"（root pid 树，
     // 含 useJob=true 但作业不可用而退化时）
-    public static bool Start(CommandDef cmd, bool useJob, out string error, out int pid, out string mode, out string id)
+    public static bool Start(CommandDef cmd, bool useJob, int requesterPid, out string error, out int pid, out string mode, out string id)
     {
         error = ""; pid = 0; mode = ""; id = "";
 
@@ -251,6 +301,8 @@ internal static class Manager
         {
             Cmd = cmd, Pid = res.Pid, Proc = res.Proc, Job = res.Job,
             Id = res.Job != null ? res.Job.Id : res.Pid.ToString(),
+            RequesterPid = requesterPid,
+            ModeName = res.Job != null ? "JOB" : "PID",
         };
         lock (Gate) Instances.Add(inst);
         pid = inst.Pid;
@@ -303,6 +355,7 @@ internal static class Manager
     {
         try
         {
+            inst.Killed = true;
             if (inst.Job != null)
             {
                 // 整树击杀：覆盖“launcher 已退出、孙进程还活着”的情况
@@ -310,6 +363,7 @@ internal static class Manager
                 seeds.Add(inst.Pid);
                 var escaped = Native.DescendantsOf(seeds); // 含作业成员与 ppid 链上的逃逸进程
                 inst.Job.TerminateAll();
+                CaptureExitCode(inst); // 句柄还在，先取退出码再释放
                 foreach (var pid in escaped)
                 {
                     if (seeds.Contains(pid)) continue; // 作业内的由 TerminateAll 处理
@@ -324,7 +378,10 @@ internal static class Manager
         catch (Exception ex) { Notify("quickcmd", "结束失败: " + ex.Message); }
         finally
         {
+            // kill 路径不会走 Prune 的“刚死”分支（Dead 已置），这里主动补 finish 审计
+            try { CaptureExitCode(inst); } catch { }
             inst.Dead = true;
+            AppendFinish(inst, "killed");
             Prune();
         }
     }

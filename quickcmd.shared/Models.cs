@@ -40,9 +40,21 @@ internal sealed class CommandDef
 
 internal sealed class IpcMessage
 {
-    public string Op { get; set; }   // ping | run | kill | ps | reload
+    public string Op { get; set; }   // ping | run | exec | kill | ps | reload | shutdown
     public string Key { get; set; }  // run: short-id/id/title；kill/front: 实例 ID（job-<数字> 或 pid，也接受树内任意 pid）
-    public string Mode { get; set; } // run 跟踪模式: "job" | "pid"（空 = job）
+    public string Mode { get; set; } // run/exec 跟踪模式: "job" | "pid"（空 = job）
+
+    // exec（免注册直跑）的载荷；run 只用 Key。
+    // Source/RequesterPid 只用于审计（history.jsonl），不参与执行。
+    public string Source { get; set; }        // cli | palette | tray
+    public int RequesterPid { get; set; }
+    public string Title { get; set; }         // exec 的历史标签（可选）
+    public string CommandLine { get; set; }   // exec: 交给 cmd /c 的整行命令
+    public string Program { get; set; }       // exec: 直接指定可执行程序（与 CommandLine 二选一）
+    public string Args { get; set; }          // exec: --program 的附加参数
+    public string Workdir { get; set; }       // exec: 执行目录（空 = 用户目录）
+    public List<string> Env { get; set; }     // exec: "KEY=VAL" 列表
+    public bool KeepOpen { get; set; }        // exec: cmd /k 保持窗口（默认 /c 跑完即退）
 }
 
 // qchost（常驻托盘宿主）对 IPC 请求的应答
@@ -73,5 +85,32 @@ internal sealed class ProcNode
     public int Pid { get; set; }
     public int Ppid { get; set; }
     public string Name { get; set; }
+}
+
+// ---------------------------------------------------------------------------
+// 执行历史（审计）：%APPDATA%\quickcmd\history.jsonl，一行一个事件。
+// 只有 qchost 写执行事件（单一写入者），CLI / 托盘只读；本地兜底直启由 CLI 记 local。
+// 一次执行两条记录：Event=start（已启动）与 Event=finish（退出/被杀），用 ExecId 关联。
+// ---------------------------------------------------------------------------
+internal sealed class HistoryEntry
+{
+    public string Id { get; set; } = Guid.NewGuid().ToString("N");
+    public DateTime Timestamp { get; set; } = DateTime.Now;   // 本地时间，便于人工对表
+    public string Event { get; set; } = "start";              // start | finish
+    public string Kind { get; set; } = "run";                 // run（注册项）| exec（免注册直跑）
+    public string Source { get; set; } = "";                  // cli | palette | tray | qchost | cli-local
+    public string ExecId { get; set; } = "";                  // 关联一次执行（adhoc-… 或命令 Id）
+    public string Title { get; set; } = "";
+    public string ShortId { get; set; } = "";
+    public string CommandLine { get; set; } = "";             // 实际执行的命令行（程序 + 参数）
+    public string Workdir { get; set; } = "";
+    public string Mode { get; set; } = "";                    // JOB | PID
+    public string InstanceId { get; set; } = "";
+    public int Pid { get; set; }
+    public string Status { get; set; } = "";                  // started|exited|killed|failed|max|host-unavailable|local
+    public int ExitCode { get; set; } = int.MinValue;         // 未知 = int.MinValue
+    public long DurationMs { get; set; } = -1;
+    public string Error { get; set; } = "";
+    public int RequesterPid { get; set; }                     // 发起请求的进程（CLI / 托盘）
 }
 

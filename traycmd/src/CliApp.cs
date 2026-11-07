@@ -37,6 +37,9 @@ internal static class CliApp
             case "delete": case "rm": return CmdDelete(rest);
             case "run": return CmdRun(rest, useJob: false);
             case "run-job": return CmdRun(rest, useJob: true);
+            case "exec": return CmdExec(rest);
+            case "history": case "hist": return CmdHistory(rest);
+            case "host": return CmdHost(rest);
             case "ps": return CmdPs(rest);
             case "kill": return CmdKill(rest);
             case "skill": case "/skill": return CmdSkill();
@@ -53,7 +56,8 @@ internal static class CliApp
 
     // 带值选项：其后紧跟的 token 一律当作值（即使以 - 开头，如 --args "--version"）
     private static readonly HashSet<string> ValueKeys = new(StringComparer.OrdinalIgnoreCase)
-    { "title", "proj", "workdir", "env", "program", "shell-script", "args", "interpreter", "max-instances" };
+    { "title", "proj", "workdir", "env", "program", "shell-script", "args", "interpreter", "max-instances",
+      "limit", "grep" };
 
     private static Options Parse(string[] args)
     {
@@ -340,8 +344,275 @@ internal static class CliApp
         // 3) 兜底：直接启动（无 qchost 跟踪，run / run-job 行为相同）
         var proc = Launcher.Launch(c, out var err2);
         if (proc == null) { Console.WriteLine("错误: " + err2); return 1; }
+        History.Append(new HistoryEntry
+        {
+            Event = "start", Kind = "run", Source = "cli-local", ExecId = c.Id,
+            Title = c.Title, ShortId = c.ShortId, CommandLine = History.CommandLineOf(c),
+            Workdir = Launcher.EffectiveWorkdir(c), Status = "local", Pid = proc.Id,
+            RequesterPid = Environment.ProcessId,
+        }, out _);
         Console.WriteLine("已直接启动（该实例不会被跟踪，也不会出现在托盘菜单中）。pid=" + proc.Id);
         return 0;
+    }
+
+    // 免注册直跑：走 qchost（它常驻托盘，不受调用方沙盒限制），并自动留审计记录。
+    // --local 显式降级为当前进程直启（记 local，提示可能受沙盒限制）。
+    private static int CmdExec(string[] a)
+    {
+        ExecArgs x;
+        try { x = ParseExec(a); }
+        catch (Exception ex) { Console.WriteLine("错误: " + ex.Message); return 2; }
+
+        var line = string.Join(" ", x.Command).Trim();
+        if (line.Length == 0 && string.IsNullOrWhiteSpace(x.Program))
+        {
+            Console.WriteLine("用法: quickcmd exec [选项] -- <命令行>");
+            Console.WriteLine("  例: quickcmd exec --workdir D:\\code\\app -- npm run build");
+            return 2;
+        }
+
+        var msg = new IpcMessage
+        {
+            Op = "exec",
+            Source = "cli",
+            RequesterPid = Environment.ProcessId,
+            Title = x.Title,
+            CommandLine = line,
+            Program = x.Program,
+            Args = x.Args ?? "",
+            Workdir = x.Workdir,
+            Env = x.Env,
+            KeepOpen = x.KeepOpen,
+            Mode = string.IsNullOrWhiteSpace(x.Mode) ? "job" : x.Mode,
+        };
+
+        if (x.Local)
+        {
+            var def = Launcher.BuildAdHoc(msg, out var perr);
+            if (def == null) { Console.WriteLine("错误: " + perr); return 2; }
+            var proc = Launcher.Launch(def, out var lerr);
+            History.Append(new HistoryEntry
+            {
+                Event = "start", Kind = "exec", Source = "cli-local", ExecId = def.Id,
+                Title = def.Title, CommandLine = History.CommandLineOf(def),
+                Workdir = Launcher.EffectiveWorkdir(def), Status = "local",
+                Pid = proc?.Id ?? 0, Error = proc == null ? lerr ?? "" : "",
+                RequesterPid = Environment.ProcessId,
+            }, out _);
+            if (proc == null) { Console.WriteLine("错误: " + lerr); return 1; }
+            Console.WriteLine("⚠ 本地直启（不经过 qchost）：进程可能受调用方沙盒/权限限制，也不在托盘实例列表里。pid=" + proc.Id);
+            Console.WriteLine("审计: quickcmd history --limit 5");
+            return 0;
+        }
+
+        // 必须经 qchost：出沙盒、实例跟踪、审计都由它负责
+        if (!Ipc.EnsureHost(500, 3000))
+        {
+            History.Append(new HistoryEntry
+            {
+                Event = "start", Kind = "exec", Source = "cli", Title = x.Title ?? line,
+                CommandLine = line, Workdir = x.Workdir ?? "", Status = "host-unavailable",
+                Error = "qchost 未启动且自动拉起失败", RequesterPid = Environment.ProcessId,
+            }, out _);
+            Console.WriteLine("错误: qchost 未运行且自动拉起失败。");
+            Console.WriteLine("      免注册直跑必须经 qchost（常驻托盘、不受调用方沙盒限制）。");
+            Console.WriteLine("      先启动 qcApp.exe（托盘），或临时用: quickcmd exec --local -- <命令>");
+            return 3;
+        }
+
+        int r = Ipc.TryCall(msg, 3000, out var resp, out var failReason);
+        if (r != 0)
+        {
+            History.Append(new HistoryEntry
+            {
+                Event = "start", Kind = "exec", Source = "cli", Title = x.Title ?? line,
+                CommandLine = line, Workdir = x.Workdir ?? "", Status = "host-unavailable",
+                Error = failReason ?? "qchost 无响应", RequesterPid = Environment.ProcessId,
+            }, out _);
+            Console.WriteLine("错误: " + (failReason ?? "qchost 无响应"));
+            return 3;
+        }
+        if (resp == null || !resp.Ok)
+        {
+            var m = resp?.Message ?? "qchost 无响应";
+            if (m.Contains("unknown op", StringComparison.OrdinalIgnoreCase))
+                m += "（qchost 版本过旧；先 quickcmd host restart 再试）";
+            Console.WriteLine("错误: " + m);
+            return 1;
+        }
+
+        Console.WriteLine("OK: " + resp.Message);
+        if (!string.IsNullOrEmpty(resp.Data))
+        {
+            try
+            {
+                var e = JsonSerializer.Deserialize<HistoryEntry>(resp.Data, Store.JsonOpts);
+                if (e != null) Console.WriteLine("历史: " + e.Title);
+            }
+            catch { }
+        }
+        Console.WriteLine("审计: quickcmd history --limit 5");
+        return 0;
+    }
+
+    private sealed class ExecArgs
+    {
+        public readonly List<string> Command = new();
+        public readonly List<string> Env = new();
+        public string Title;
+        public string Workdir;
+        public string Mode;
+        public string Program;
+        public string Args;
+        public bool KeepOpen;
+        public bool Local;
+    }
+
+    // exec 的解析规则：选项只能出现在命令之前；遇到 "--" 或第一个非选项 token 后，
+    // 其余全部原样作为命令行（命令自身的 --flag 不会被当成 quickcmd 选项）。
+    private static ExecArgs ParseExec(string[] a)
+    {
+        var r = new ExecArgs();
+        for (int i = 0; i < a.Length; i++)
+        {
+            var t = a[i];
+            if (t == "--")
+            {
+                for (i++; i < a.Length; i++) r.Command.Add(a[i]);
+                break;
+            }
+            if (t.StartsWith("--", StringComparison.Ordinal))
+            {
+                var key = t.Substring(2);
+                string val = null;
+                var eq = key.IndexOf('=');
+                if (eq >= 0) { val = key.Substring(eq + 1); key = key.Substring(0, eq); }
+                switch (key.ToLowerInvariant())
+                {
+                    case "workdir": r.Workdir = val ?? NextValue(a, ref i); break;
+                    case "env": r.Env.Add(val ?? NextValue(a, ref i)); break;
+                    case "title":
+                    case "label": r.Title = val ?? NextValue(a, ref i); break;
+                    case "mode": r.Mode = val ?? NextValue(a, ref i); break;
+                    case "program": r.Program = val ?? NextValue(a, ref i); break;
+                    case "args": r.Args = val ?? NextValue(a, ref i); break;
+                    case "keep-open": r.KeepOpen = true; break;
+                    case "local": r.Local = true; break;
+                    default: throw new ArgumentException("未知选项 --" + key + "（quickcmd help 查看 exec 选项）");
+                }
+                continue;
+            }
+
+            for (; i < a.Length; i++) r.Command.Add(a[i]);
+            break;
+        }
+        return r;
+    }
+
+    private static string NextValue(string[] a, ref int i) =>
+        i + 1 < a.Length ? a[++i] : throw new ArgumentException("选项缺值");
+
+    // 审计历史：默认最近 20 条；--json 给机器读；--clear -y 清空。
+    private static int CmdHistory(string[] a)
+    {
+        var o = Parse(a);
+        if (o.Has("clear"))
+        {
+            if (!o.Has("yes"))
+            {
+                Console.WriteLine("清空审计历史不可撤销：确认请用 quickcmd history --clear -y");
+                return 1;
+            }
+            if (!History.Clear(out var cerr)) { Console.WriteLine("错误: " + cerr); return 1; }
+            Console.WriteLine("已清空: " + History.FilePath);
+            return 0;
+        }
+
+        int limit = 20;
+        if (o.Has("limit"))
+        {
+            if (!int.TryParse(o.Value("limit"), out limit) || limit < 0)
+            {
+                Console.WriteLine("错误: --limit 需要 >=0 的整数（0 = 全部）");
+                return 2;
+            }
+        }
+
+        var list = History.Read(limit, o.Value("grep"), out var bad);
+        if (o.Has("json"))
+        {
+            Console.WriteLine(JsonSerializer.Serialize(list, Store.JsonOpts));
+            return 0;
+        }
+        if (bad > 0) Console.WriteLine("⚠ 跳过 " + bad + " 行无法解析的历史");
+        if (list.Count == 0)
+        {
+            Console.WriteLine("（没有历史记录。用 quickcmd run / exec 执行后产生。文件: " + History.FilePath + "）");
+            return 0;
+        }
+
+        Console.WriteLine("TIME           EVENT  TYPE  SOURCE       STATUS           COMMAND");
+        foreach (var e in list)
+        {
+            var ev = e.Event == "finish" ? "完成" : "启动";
+            var kind = e.Kind == "exec" ? "直跑" : "注册";
+            var status = History.StatusText(e.Status)
+                + (e.ExitCode != int.MinValue ? "(" + e.ExitCode + ")" : "");
+            Console.WriteLine(
+                e.Timestamp.ToString("MM-dd HH:mm:ss").PadRight(15)
+                + ev.PadRight(7)
+                + kind.PadRight(6)
+                + Trunc(string.IsNullOrWhiteSpace(e.Source) ? "-" : e.Source, 10).PadRight(13)
+                + status.PadRight(17)
+                + Trunc(e.CommandLine, 60));
+        }
+        Console.WriteLine("（共 " + list.Count + " 条；文件: " + History.FilePath + "）");
+        return 0;
+    }
+
+    // 常驻宿主管理（升级/排障用）：status | stop | restart
+    private static int CmdHost(string[] a)
+    {
+        var sub = (a.FirstOrDefault() ?? "status").ToLowerInvariant();
+        switch (sub)
+        {
+            case "status":
+            {
+                int r = Ipc.TryCall(new IpcMessage { Op = "ping" }, 800, out var resp, out _);
+                if (r == 0 && resp != null && resp.Ok)
+                {
+                    Console.WriteLine("qchost: 在线 (" + resp.Message + ")");
+                    return 0;
+                }
+                Console.WriteLine("qchost: 未运行");
+                return 1;
+            }
+            case "stop":
+            case "restart":
+            {
+                int r = Ipc.TryCall(new IpcMessage { Op = "shutdown" }, 1500, out _, out _);
+                if (r == 0)
+                {
+                    Console.WriteLine("qchost 已退出");
+                    Thread.Sleep(300);
+                }
+                else Console.WriteLine("qchost 未运行");
+
+                if (sub == "restart")
+                {
+                    if (!Ipc.EnsureHost(500, 5000))
+                    {
+                        Console.WriteLine("错误: qchost 重启失败（新进程未就绪）");
+                        return 1;
+                    }
+                    Console.WriteLine("qchost 已重启");
+                }
+                return 0;
+            }
+            default:
+                Console.WriteLine("用法: quickcmd host [status|stop|restart]");
+                return 2;
+        }
     }
 
     // 通过共享 IPC 协议向 qchost 发一条请求。返回：0=拿到响应 1=连接中断/无响应（已打印） 2=qchost 不在（未连上）
@@ -355,8 +626,14 @@ internal static class CliApp
     // 返回：0=成功 1=失败（已打印） 2=qchost 不在。ps/kill 不自动拉起 qchost：实例本来就活在 qchost 里
     private static int SendRunToQchost(CommandDef c, bool useJob, int connectTimeoutMs)
     {
-        int r = TryQchostCall(new IpcMessage { Op = "run", Key = c.Id, Mode = useJob ? "job" : "pid" },
-            connectTimeoutMs, out var gr);
+        int r = TryQchostCall(new IpcMessage
+        {
+            Op = "run",
+            Key = c.Id,
+            Mode = useJob ? "job" : "pid",
+            Source = "cli",
+            RequesterPid = Environment.ProcessId,
+        }, connectTimeoutMs, out var gr);
         if (r != 0) return r;
         Console.WriteLine((gr != null && gr.Ok ? "OK: " : "错误: ") + (gr?.Message ?? "(无响应)"));
         return gr != null && gr.Ok ? 0 : 1;
@@ -511,7 +788,8 @@ internal static class CliApp
         Console.WriteLine("""
 quickcmd — 系统托盘命令启动器（CLI）
 qchost（quick command host）= 常驻托盘的宿主进程 qchost.exe：负责托盘菜单、实例跟踪、IPC 服务端。
-数据文件: %APPDATA%\quickcmd\commands.jsonl
+数据文件: %APPDATA%\quickcmd\commands.jsonl（注册项）
+审计文件: %APPDATA%\quickcmd\history.jsonl（执行历史，qchost 自动写入）
 
 用法:
   quickcmd                                  无参数 = 显示本帮助
@@ -522,6 +800,10 @@ qchost（quick command host）= 常驻托盘的宿主进程 qchost.exe：负责�
   quickcmd delete <short-id|id|title> [-y]
   quickcmd run <short-id|id|title>         以 [PID] 模式运行（按 root pid 进程树跟踪）
   quickcmd run-job <short-id|id|title>     以 [JOB] 模式运行（作业对象整树跟踪，推荐）
+  quickcmd exec [选项] -- <命令行>          免注册直跑（经 qchost 出沙盒，自动记入审计历史）
+  quickcmd history [--limit N] [--grep 文本] [--json] [--clear -y]
+                                           查看/导出/清空执行审计历史（默认最近 20 条）
+  quickcmd host [status|stop|restart]      管理常驻宿主 qchost（升级/排障用）
   quickcmd ps                              列出 qchost 正在跟踪的实例（ID=job-<数字> 或 root pid）
   quickcmd kill <实例ID>                    结束实例：ID 取自 ps（[JOB] 杀整棵作业树+逃逸子孙，传树内任意 pid 也可定位）
   quickcmd skill                           显示配套 agent skill 文档（嵌入在本程序内）
@@ -542,6 +824,18 @@ add / update 选项:
   --max-instances <N>      并发实例上限，默认 1（已到上限再点击会置前现有实例）
   --close-on-exit          命令结束后关闭窗口（默认保持窗口: python 用 -i、ps1 用 -NoExit、bat 用 /k）
 
+exec 选项（写在 -- 之前）:
+  --workdir <目录>         执行目录（支持 %VAR% 占位符；空 = 用户目录）
+  --env <KEY=VAL>          环境变量，可重复
+  --title/--label <名>     历史里显示的名字（默认取命令行前 60 字）
+  --mode job|pid           跟踪模式，默认 job（作业对象整树）
+  --program <程序>         直接启动程序（与 -- 之后的命令行二选一）
+  --args <参数>            --program 的附加参数
+  --keep-open              窗口保持（cmd /k；默认 /c 跑完即退）
+  --local                  显式降级为当前进程直启：可能受调用方沙盒限制，且不进托盘实例
+  说明: exec 默认必须经 qchost（常驻托盘，出沙盒）；qchost 不在时命令失败（退出码 3），
+        不会静默在沙盒内直接执行。-- 之后的整行原样交给 cmd。
+
 示例:
   quickcmd add --title "Dev Server" --proj myapp --workdir D:\code\myapp --program "npm" --args "run dev"
   quickcmd add --title "数据同步" --workdir D:\jobs --shell-script D:\jobs\sync.py --interpreter "D:\py312;D:\py311"
@@ -549,6 +843,9 @@ add / update 选项:
   quickcmd update 1a2b3c4d --max-instances 3
   quickcmd run 1a2b3c4d          # [PID] 模式
   quickcmd run-job 1a2b3c4d      # [JOB] 模式
+  quickcmd exec --workdir D:\\code\\app -- npm run build   # 免注册跑一次
+  quickcmd exec -- echo ok > %USERPROFILE%\\probe.txt      # 原样交给 cmd
+  quickcmd history --limit 10 --grep npm
   quickcmd delete 1a2b3c4d -y
 
 说明:

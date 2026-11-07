@@ -51,15 +51,73 @@ internal static class IpcServer
                     return Ok("qchost");
 
                 case "run":
+                {
                     var list = Store.Load(out _);
                     var c = Resolver.Resolve(msg.Key, list, out var err);
-                    if (c == null) return Err(err);
+                    if (c == null)
+                    {
+                        AppendHistory(new HistoryEntry
+                        {
+                            Event = "start", Kind = "run", Source = SourceOf(msg),
+                            Title = msg.Key ?? "", Status = "failed", Error = err,
+                            RequesterPid = msg.RequesterPid,
+                        });
+                        return Err(err);
+                    }
+
                     bool useJob = !string.Equals(msg.Mode, "pid", StringComparison.OrdinalIgnoreCase);
-                    if (Manager.Start(c, useJob, out var serr, out var spid, out var smode, out var sid))
-                        return Ok("[" + smode + "] 已启动 " + sid + (smode == "JOB" ? "" : " pid=" + spid));
+                    var entry = NewEntry(msg, "run", c);
+                    if (Manager.Start(c, useJob, msg.RequesterPid, out var serr, out var spid, out var smode, out var sid))
+                    {
+                        entry.Status = "started";
+                        entry.Mode = smode;
+                        entry.InstanceId = sid;
+                        entry.Pid = spid;
+                        AppendHistory(entry);
+                        return Ok("[" + smode + "] 已启动 " + sid + (smode == "JOB" ? "" : " pid=" + spid), entry);
+                    }
                     if (serr == "max")
+                    {
+                        entry.Status = "max";
+                        AppendHistory(entry);
                         return Ok("已达实例上限，已置前现有实例");
+                    }
+                    entry.Status = "failed";
+                    entry.Error = serr;
+                    AppendHistory(entry);
                     return Err(serr);
+                }
+
+                case "exec":
+                {
+                    var c = Launcher.BuildAdHoc(msg, out var err);
+                    if (c == null)
+                    {
+                        AppendHistory(new HistoryEntry
+                        {
+                            Event = "start", Kind = "exec", Source = SourceOf(msg),
+                            Title = msg.Title ?? "", CommandLine = msg.CommandLine ?? "",
+                            Status = "failed", Error = err, RequesterPid = msg.RequesterPid,
+                        });
+                        return Err(err);
+                    }
+
+                    bool useJob = !string.Equals(msg.Mode, "pid", StringComparison.OrdinalIgnoreCase);
+                    var entry = NewEntry(msg, "exec", c);
+                    if (Manager.Start(c, useJob, msg.RequesterPid, out var serr, out var spid, out var smode, out var sid))
+                    {
+                        entry.Status = "started";
+                        entry.Mode = smode;
+                        entry.InstanceId = sid;
+                        entry.Pid = spid;
+                        AppendHistory(entry);
+                        return Ok("[" + smode + "] 已启动 " + sid + "（免注册直跑）", entry);
+                    }
+                    entry.Status = "failed";
+                    entry.Error = serr;
+                    AppendHistory(entry);
+                    return Err(serr);
+                }
 
                 case "ps":
                     var snap = Manager.Snapshot();
@@ -96,9 +154,34 @@ internal static class IpcServer
         catch (Exception ex) { return Err(ex.Message); }
     }
 
-    private static string Ok(string m) =>
-        JsonSerializer.Serialize(new QchostResponse { Ok = true, Message = m }, Store.JsonOpts);
+    private static string Ok(string m, HistoryEntry entry = null) =>
+        JsonSerializer.Serialize(new QchostResponse
+        {
+            Ok = true,
+            Message = m,
+            Data = entry == null ? null : JsonSerializer.Serialize(entry, Store.JsonOpts),
+        }, Store.JsonOpts);
 
     private static string Err(string m) =>
         JsonSerializer.Serialize(new QchostResponse { Ok = false, Message = m }, Store.JsonOpts);
+
+    // ----- 审计（history.jsonl）辅助 -----
+
+    private static string SourceOf(IpcMessage msg) =>
+        string.IsNullOrWhiteSpace(msg.Source) ? "cli" : msg.Source.Trim();
+
+    private static HistoryEntry NewEntry(IpcMessage msg, string kind, CommandDef c) => new()
+    {
+        Event = "start",
+        Kind = kind,
+        Source = SourceOf(msg),
+        ExecId = c.Id,
+        Title = c.Title,
+        ShortId = c.ShortId,
+        CommandLine = History.CommandLineOf(c),
+        Workdir = Launcher.EffectiveWorkdir(c),
+        RequesterPid = msg.RequesterPid,
+    };
+
+    private static void AppendHistory(HistoryEntry e) => History.Append(e, out _);
 }

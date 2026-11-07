@@ -77,6 +77,9 @@ internal static class Native
     [DllImport("kernel32.dll")] public static extern uint ResumeThread(IntPtr hThread);
     [DllImport("kernel32.dll")] public static extern uint WaitForSingleObject(IntPtr hHandle, uint dwMilliseconds);
     [DllImport("kernel32.dll")] public static extern bool TerminateProcess(IntPtr hProcess, uint uExitCode);
+    // 审计用：作业模式保 root 句柄，作业完成后取退出码（root 早退也能拿到）
+    [DllImport("kernel32.dll", SetLastError = true)]
+    public static extern bool GetExitCodeProcess(IntPtr hProcess, out uint lpExitCode);
 
     [DllImport("kernel32.dll", SetLastError = true, CharSet = CharSet.Unicode)]
     public static extern IntPtr CreateJobObjectW(IntPtr lpJobAttributes, string lpName);

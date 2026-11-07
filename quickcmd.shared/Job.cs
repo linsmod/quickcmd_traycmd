@@ -20,6 +20,10 @@ internal sealed class Job : IDisposable
 {
     public IntPtr Handle { get; private set; }
 
+    // root 进程句柄：作业模式为了拿退出码（审计）而保留，Dispose 时关闭。
+    // 不放进 Instance：Job 与 Instance 同生命周期，统一在这里释放。
+    public IntPtr RootProcessHandle { get; private set; }
+
     // 作业实例序号：内核不向用户态暴露作业对象的数字 ID（实测 kernel32/kernelbase
     // ordinal #793 "GetJobObjectInfo" 对匿名作业返回全零，拿不到 KMTID），由 qchost
     // 在 Create 时按创建顺序分配 "job-<N>"，随 Job 对象走，与句柄值复用无关。
@@ -72,7 +76,8 @@ internal sealed class Job : IDisposable
 
             Native.ResumeThread(pi.hThread);
             Native.CloseHandle(pi.hThread);
-            Native.CloseHandle(pi.hProcess); // 进程在作业内的成员关系与此句柄无关
+            // 进程句柄保留：作业完成后 Manager 用它取 root 退出码（审计 finish 事件）
+            RootProcessHandle = pi.hProcess;
             pid = pi.dwProcessId;
             return true;
         }
@@ -149,6 +154,11 @@ internal sealed class Job : IDisposable
 
     public void Dispose()
     {
+        if (RootProcessHandle != IntPtr.Zero)
+        {
+            try { Native.CloseHandle(RootProcessHandle); } catch { }
+            RootProcessHandle = IntPtr.Zero;
+        }
         if (Handle != IntPtr.Zero)
         {
             try { Native.CloseHandle(Handle); } catch { }

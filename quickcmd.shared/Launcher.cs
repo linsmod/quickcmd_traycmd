@@ -23,6 +23,63 @@ internal static class Launcher
         return d;
     }
 
+    // exec（免注册直跑）：把 IPC 载荷规整成一次性的 CommandDef。
+    // 有 CommandLine → cmd /d /s /c（或 /k）包装，等价注册项的“裸命令经 cmd 兜底”；
+    // 有 Program → 直接启动。Id 用 adhoc-<hex>，历史里一眼能区分来源。
+    public static CommandDef BuildAdHoc(IpcMessage msg, out string error)
+    {
+        error = "";
+        if (msg == null) { error = "空请求"; return null; }
+
+        var line = (msg.CommandLine ?? "").Trim();
+        var prog = (msg.Program ?? "").Trim();
+        if (line.Length == 0 && prog.Length == 0)
+        {
+            error = "exec 需要命令行（-- 之后）或 --program";
+            return null;
+        }
+        if (line.Length > 0 && prog.Length > 0)
+        {
+            error = "--program 与命令行只能二选一";
+            return null;
+        }
+        if (line.Length > 32000)
+        {
+            error = "命令行过长（上限 32000 字符）";
+            return null;
+        }
+
+        var title = (msg.Title ?? "").Trim();
+        if (title.Length == 0) title = prog.Length > 0 ? prog : line;
+        if (title.Length > 60) title = title.Substring(0, 59) + "…";
+
+        var d = new CommandDef
+        {
+            Id = "adhoc-" + Guid.NewGuid().ToString("N"),
+            Title = title,
+            Workdir = (msg.Workdir ?? "").Trim(),
+            Env = (msg.Env ?? new List<string>())
+                .Select(s => (s ?? "").Trim()).Where(s => s.Length > 0).ToList(),
+            KeepOpen = msg.KeepOpen,
+            MaxInstances = 1,
+            CreatedAt = DateTime.Now,
+            UpdatedAt = DateTime.Now,
+        };
+
+        if (prog.Length > 0)
+        {
+            d.Program = prog;
+            d.Args = msg.Args ?? "";
+        }
+        else
+        {
+            // 与 ApplyCmdFallback 相同：/d 关 AutoRun、/s 保留引号原样
+            d.Program = "cmd.exe";
+            d.Args = "/d /s " + (msg.KeepOpen ? "/k " : "/c ") + "\"" + line + "\"";
+        }
+        return d;
+    }
+
     // 启动结果（作业跟踪模式）：Proc 为 null 表示 root 在查询瞬间已退出，
     // 但 Job 非空时孙进程可能仍在，实例依旧存活；Job 为 null = 退化为普通跟踪
     internal sealed class LaunchResult

@@ -322,6 +322,8 @@ function durMs(ms) {
 /* ---------- 项目栏 / Launcher 分屏 ---------- */
 // 项目栏顶部的固定分类（跨项目汇总 pinned 命令）
 const PIN_SCREEN = "Pinned";
+const PIN_LABEL = "📌 Pinned";
+const screenLabel = n => n === PIN_SCREEN ? PIN_LABEL : n;
 function pinnedCmds() {
   const list = (state && state.host && state.host.pinned) || [];
   return cmds().filter(c => list.some(x => sameShort(x, c.shortId)));
@@ -367,8 +369,8 @@ function renderProjects() {
       : all.filter(c => projOf(c) === n);
     if (n === "未分组") html += '<div class="psep"></div>';
     const running = list.filter(c => c.state === "running").length;
-    html += '<div class="pitem' + (project === n ? " on" : "") + '" data-proj="' + esc(n) + '" title="' + esc(n) + '">' +
-      '<span class="pname">' + esc(n) + '</span>' +
+    html += '<div class="pitem' + (project === n ? " on" : "") + '" data-proj="' + esc(n) + '" title="' + esc(screenLabel(n)) + '">' +
+      '<span class="pname">' + esc(screenLabel(n)) + '</span>' +
       (running ? '<span class="dot up" title="' + running + ' 个运行中"></span>' : '') +
       '<span class="cnt">' + list.length + '</span></div>';
     if (n === PIN_SCREEN && i < names.length - 1) html += '<div class="psep"></div>';
@@ -380,7 +382,7 @@ function renderDots() {
   const names = screenNames();
   const cur = screenIndex();
   $("#dots").innerHTML = names.map((n, i) =>
-    '<i class="' + (i === cur ? "on" : "") + '" data-screen="' + i + '" title="' + esc(n) + '"></i>').join("");
+    '<i class="' + (i === cur ? "on" : "") + '" data-screen="' + i + '" title="' + esc(screenLabel(n)) + '"></i>').join("");
   $("#dots").classList.toggle("hide", searchOpen || names.length < 2);
 }
 

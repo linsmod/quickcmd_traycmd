@@ -86,25 +86,11 @@ Invoke-WebRequest -UseBasicParsing http://127.0.0.1:41777/api/state | Select-Obj
 - **文件锁**：qchost/qcApp 运行时锁定 dist 里的 exe/dll；直接跑 `make_dist.ps1` 会出现删除/复制失败或留下混合版本。必须先停进程。
 - **自动启动**：宿主启动后会按命令的 `--auto-start` 自动拉起 web 服务（`Program.AutoStartWeb`），验证时不要误判为“上次实例还在”。
 - **端口顺延**：首选端口被占用时宿主会 +1 顺延并回写 settings；文档里的 41777 以当前 settings 为准。
-- **tasks 会掉跟踪**：宿主重启后旧 JOB 实例的跟踪/停止能力取决于进程本身是否存活；重启前告知用户。
-- 只改页面时不必走 dist，预览工具即可；发布后也只需覆盖 `dist\web\index.html` 并刷新。
+- **tasks 会掉跟踪**：宿主重启后旧 JOB 实例的跟踪/停止能力取决于进程本身是否存活；重启前告知用户，发布后按需用 `quickcmd run-job <short-id>` 恢复之前运行的 JOB。
+- **启动工作目录**：`Start-Process traycmd\dist\qcApp.exe` 的工作目录要设为 `dist`，qcApp 会以 qchost 子进程的方式自动拉起宿主。
+- 只改页面时不必走 dist，预览工具即可；发布后也只需覆盖 `dist\web\index.html` 并刷新，可顺手核对它与 `quickcmdhost\web\index.html` 的哈希一致。
 
 ## 退出条件
 
 - `host status` 在线、`/api/state` 返回 200、真实控制台显示新版本。
 - 发布过程中断或失败：记录当前 dist 状态，按“回滚”恢复，未完成项登记到 `issues/INDEX.md`。
-
-## 执行记录
-
-### 2026-11-19 12:42–12:43（Web 控制台新 UI 发布）
-
-- 备份：`traycmd\dist` → `%TEMP%\opencode\dist-backup-20261119-124252`（约 923 KB）。
-- 停止：`quickcmd kill job-1` 结束「演示站点」→ `quickcmd host stop` → `Stop-Process qcApp`。
-- 确认 dist 路径下已无进程（否则文件锁会让发布留下混合版本）。
-- 发布：`cd traycmd; powershell -File .\make_dist.ps1 -Configuration Release`
-  - 构建约 1.7 秒；生成 `dist\qcApp.exe`、`qchost.exe`、`quickcmd.exe`。
-- 启动：`Start-Process traycmd\dist\qcApp.exe`（工作目录 `dist`）。qcApp 自动拉起 qchost（`qchost` 的父进程是 `qcApp`）。
-- 验证：`quickcmd host status` 在线；`/` 返回 200 且包含 `launcher-wrap`、`id="hist"`；`/api/state` 正常；Edge 截图确认为新版三栏 UI。
-- 恢复：`quickcmd run-job 97957db5` 重新启动演示站点（JOB，`job-1`），`http://127.0.0.1:41270/` 返回 200。
-- 附带验证写路径：从页面提取 token，POST `/api/pin` 取消并恢复固定（均 200），固定项顺序已恢复为原顺序。
-- 2026-11-19 12:55、13:06 又按同一流程发布了两次（直接输入搜索、搜索框常驻）；每次发布前备份 dist、发布后重启演示站点，并在真实 41777 上用 Edge headless 复测。

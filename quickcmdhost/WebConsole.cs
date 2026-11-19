@@ -791,17 +791,13 @@ function defaultProject(names) {
 
 function renderProjects() {
   const all = cmds();
-  const allRunning = all.filter(c => c.state === "running").length;
-  let html = '<div class="pitem' + (searchOpen ? " on" : "") + '" data-searchall="1" title="搜索全部命令（Ctrl+K）">' +
-    '<span class="pname">全部</span>' +
-    (allRunning ? '<span class="dot up" title="' + allRunning + ' 个运行中"></span>' : '') +
-    '<span class="cnt">' + all.length + '</span></div>';
+  let html = "";
 
   for (const n of screenNames()) {
     const list = n === "未分组" ? all.filter(c => !projOf(c)) : all.filter(c => projOf(c) === n);
     if (n === "未分组") html += '<div class="psep"></div>';
     const running = list.filter(c => c.state === "running").length;
-    html += '<div class="pitem' + (!searchOpen && project === n ? " on" : "") + '" data-proj="' + esc(n) + '" title="' + esc(n) + '">' +
+    html += '<div class="pitem' + (project === n ? " on" : "") + '" data-proj="' + esc(n) + '" title="' + esc(n) + '">' +
       '<span class="pname">' + esc(n) + '</span>' +
       (running ? '<span class="dot up" title="' + running + ' 个运行中"></span>' : '') +
       '<span class="cnt">' + list.length + '</span></div>';
@@ -1542,9 +1538,6 @@ document.addEventListener("click", e => {
     if (i >= 0) goScreen(i);
     return;
   }
-
-  const searchAll = e.target.closest("[data-searchall]");
-  if (searchAll) { openSearch(); return; }
 
   const dot = e.target.closest("[data-screen]");
   if (dot) { goScreen(+dot.dataset.screen); return; }

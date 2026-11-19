@@ -559,8 +559,6 @@ body[data-w="wide"] .pane-head .back{display:none}         /* 宽屏三栏：列
 .pane-head .t{font-size:13px;font-weight:600;white-space:nowrap;min-width:0;overflow:hidden;text-overflow:ellipsis}
 .pane-head .s{font-size:11px;color:#8b8b95;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .pane-head .sp{flex:1}
-.tabs{display:flex;gap:6px;flex:0 0 auto}
-.tabs button.on{background:#2e3947;border-color:#3d4f63;color:#a9c7e4}
 .pane-body{flex:1;min-height:0;overflow:auto}
 pre.log{margin:0;padding:10px 14px;font:11.5px/1.6 Consolas,monospace;color:#c9c9d3;white-space:pre-wrap;word-break:break-all}
 .logempty{padding:30px 16px;text-align:center;color:#75777f;font-size:12.5px;line-height:1.7}
@@ -1026,10 +1024,6 @@ function renderPane() {
         : '<div class="t">属性</div><div class="s">' + esc(c.title) + '</div>') +
       '<span class="sp"></span>' +
       (sheet === "log" && logKey ? '<button class="ghost" data-logkey="' + esc(logKey) + '" title="在新标签页打开日志">↗</button>' : '') +
-      '<div class="tabs">' +
-        '<button class="' + (sheet === "log" ? "on" : "") + '" data-tab="log">日志</button>' +
-        '<button class="' + (sheet === "props" ? "on" : "") + '" data-tab="props">属性</button>' +
-      '</div>' +
     '</div>';
 
   let body;
@@ -1129,7 +1123,7 @@ function openApp(id) {
   currentId = c.shortId;
   selKey = "";
   runFilter = "all";
-  sheet = (isWide() && runsOf(c).length) ? "log" : null;
+  sheet = isWide() ? (runsOf(c).length ? "log" : "props") : null;
   document.body.dataset.route = "app";
   syncSheet();
   renderApp();
@@ -1285,7 +1279,7 @@ function applyHash() {
       if (names.includes(cp)) { project = cp; saveProject(); }
       route = "app";
       currentId = c.shortId;
-      sheet = (isWide() && runsOf(c).length) ? "log" : null;
+      sheet = isWide() ? (runsOf(c).length ? "log" : "props") : null;
       document.body.dataset.route = "app";
       syncSheet();
     }
@@ -1342,10 +1336,10 @@ async function load() {
       const sc = captureScroll();
       lastSig = sig;
       if (!inited) { inited = true; applyHash(); }
-      // 宽屏下新出现的执行记录：直接把日志铺到右边
+      // 宽屏：有记录铺日志，没有记录铺属性，始终保持左右两部分
       if (isWide() && route === "app" && !sheet) {
         const c = appById(currentId);
-        if (c && runsOf(c).length) { sheet = "log"; syncSheet(); }
+        if (c) { sheet = runsOf(c).length ? "log" : "props"; syncSheet(); }
       }
       render();
       restoreScroll(sc);
@@ -1482,9 +1476,6 @@ document.addEventListener("click", e => {
     return;
   }
 
-  const tab = e.target.closest("[data-tab]");
-  if (tab) { openSheet(tab.dataset.tab); return; }
-
   const sheetBtn = e.target.closest("[data-open-sheet]");
   if (sheetBtn) { openSheet(sheetBtn.dataset.openSheet); return; }
 
@@ -1598,10 +1589,10 @@ function applyWidth() {
   const appW = rightW - (mode === "wide" ? 340 : 0);
   document.body.dataset.compact = appW < 560 ? "1" : "0";
 
-  // 布局一变宽，且当前在命令页：直接把日志铺到右边
+  // 布局变宽且当前在命令页：有记录铺日志，没有记录铺属性
   const c = appById(currentId);
-  if (mode === "wide" && route === "app" && !sheet && c && runsOf(c).length) {
-    sheet = "log";
+  if (mode === "wide" && route === "app" && !sheet && c) {
+    sheet = runsOf(c).length ? "log" : "props";
     syncSheet();
   }
   renderApp();

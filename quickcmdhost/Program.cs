@@ -23,6 +23,12 @@ internal static class Program
         var server = new Thread(IpcServer.ServeLoop) { IsBackground = true };
         server.Start();
 
+        // 本地 Web 控制台（127.0.0.1，端口见 settings.json）；起不来不影响宿主
+        WebConsole.Start();
+
+        // web + --auto-start 的命令：宿主启动后自动拉起（失败只记审计，不影响宿主）
+        ThreadPool.QueueUserWorkItem(_ => AutoStartWeb());
+
         using var pruneTimer = new Timer(_ =>
         {
             try { Manager.Prune(); } catch { }
@@ -33,4 +39,36 @@ internal static class Program
     }
 
     public static void RequestExit() => ExitSignal.Set();
+
+    // web + AutoStart：qchost 启动时把站点拉起来，并像 IPC 启动一样写一条 start 审计
+    private static void AutoStartWeb()
+    {
+        try
+        {
+            var list = Store.Load(out _);
+            foreach (var c in list.Where(x => x.IsWeb && x.AutoStart))
+            {
+                if (Manager.ForCommand(c.Id).Count > 0) continue;
+                if (!Manager.Start(c, true, 0, out var err, out var pid, out var mode, out var id, out var log)) continue;
+
+                History.Append(new HistoryEntry
+                {
+                    Event = "start",
+                    Kind = "run",
+                    Source = "qchost-auto",
+                    ExecId = c.Id,
+                    Title = c.Title,
+                    ShortId = c.ShortId,
+                    CommandLine = History.CommandLineOf(c),
+                    Workdir = Launcher.EffectiveWorkdir(c),
+                    Mode = mode,
+                    InstanceId = id,
+                    Pid = pid,
+                    Status = "started",
+                    LogPath = log ?? "",
+                }, out _);
+            }
+        }
+        catch { }
+    }
 }

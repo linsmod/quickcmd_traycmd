@@ -38,6 +38,10 @@ internal static class CliApp
             case "run": return CmdRun(rest, useJob: false);
             case "run-job": return CmdRun(rest, useJob: true);
             case "exec": return CmdExec(rest);
+            case "serve": return StaticServer.Run(rest);
+            case "url": return CmdUrl(rest);
+            case "logs": case "log": return CmdLogs(rest);
+            case "ui": return CmdUi(rest);
             case "history": case "hist": return CmdHistory(rest);
             case "host": return CmdHost(rest);
             case "ps": return CmdPs(rest);
@@ -57,7 +61,8 @@ internal static class CliApp
     // 带值选项：其后紧跟的 token 一律当作值（即使以 - 开头，如 --args "--version"）
     private static readonly HashSet<string> ValueKeys = new(StringComparer.OrdinalIgnoreCase)
     { "title", "proj", "workdir", "env", "program", "shell-script", "args", "interpreter", "max-instances",
-      "limit", "grep" };
+      "type", "url",
+      "limit", "grep", "tail" };
 
     private static Options Parse(string[] args)
     {
@@ -93,9 +98,38 @@ internal static class CliApp
     {
         "title", "proj", "workdir", "env", "program", "shell-script", "args",
         "interpreter", "max-instances", "close-on-exit", "keep-open",
+        "type", "url", "auto-start", "no-auto-start",
+        "capture-logs", "no-capture-logs",
     };
 
-    private static int CmdAdd(string[] a)
+    // --type：app/空 = 普通程序；web = 网站/常驻服务。返回 null = 非法值
+    private static string NormalizeType(string t)
+    {
+        t = (t ?? "").Trim().ToLowerInvariant();
+        if (t.Length == 0 || t == "app") return "";
+        return t == "web" ? "web" : null;
+    }
+
+    private static bool IsHttpUrl(string url) =>
+        Uri.TryCreate(url, UriKind.Absolute, out var u) &&
+        (u.Scheme == Uri.UriSchemeHttp || u.Scheme == Uri.UriSchemeHttps);
+
+    // 裸名 quickcmd / quickcmd.exe 解析成本进程的绝对路径。
+    // 必须在这里（CLI 进程内）解析：qchost 里 Environment.ProcessPath 指向 qchost.exe，
+    // 运行时再翻译会启动错程序。
+    private static string ResolveSelfProgram(string prog)
+    {
+        if (string.IsNullOrWhiteSpace(prog)) return prog;
+        var t = prog.Trim();
+        if (t.IndexOf('\\') >= 0 || t.IndexOf('/') >= 0) return t;
+        if (!t.Equals("quickcmd", StringComparison.OrdinalIgnoreCase) &&
+            !t.Equals("quickcmd.exe", StringComparison.OrdinalIgnoreCase)) return t;
+        return Environment.ProcessPath ?? t;
+    }
+
+    private static int CmdAdd(string[] a) => Store.WithWriteLock(() => CmdAddCore(a));
+
+    private static int CmdAddCore(string[] a)
     {
         var o = Parse(a);
         var unknown = o.Map.Keys.Where(k => !AddUpdateKeys.Contains(k)).ToList();
@@ -107,7 +141,7 @@ internal static class CliApp
 
         var title = o.Value("title");
         if (string.IsNullOrWhiteSpace(title)) { Console.WriteLine("错误: 必须提供 --title"); return 2; }
-        var prog = o.Value("program");
+        var prog = ResolveSelfProgram(o.Value("program"));
         var script = o.Value("shell-script");
         if (string.IsNullOrWhiteSpace(prog) && string.IsNullOrWhiteSpace(script))
         {
@@ -138,6 +172,17 @@ internal static class CliApp
                 return 2;
             }
 
+        var type = NormalizeType(o.Value("type"));
+        if (type == null) { Console.WriteLine("错误: --type 只支持 app（默认）或 web"); return 2; }
+        var url = (o.Value("url") ?? "").Trim();
+        if (url.Length > 0 && !IsHttpUrl(url))
+        {
+            Console.WriteLine("错误: --url 必须是 http:// 或 https:// 开头的完整地址，实际: " + url);
+            return 2;
+        }
+        if (type == "web" && url.Length == 0)
+            Console.WriteLine("⚠ 注意: --type web 没有 --url，托盘/面板无法提供“打开网站”入口");
+
         var list = Store.Load(out _);
         var c = new CommandDef
         {
@@ -149,6 +194,10 @@ internal static class CliApp
             ShellScript = script?.Trim() ?? "",
             Args = o.Value("args") ?? "",
             Interpreter = (o.Value("interpreter") ?? "").Trim(),
+            Type = type,
+            Url = url,
+            AutoStart = o.Has("auto-start"),
+            CaptureLogs = o.Has("capture-logs"),
             KeepOpen = !o.Has("close-on-exit"),
         };
         var mi = o.Value("max-instances");
@@ -163,7 +212,17 @@ internal static class CliApp
         }
 
         if (c.Workdir.Length > 0 && !Directory.Exists(Launcher.Expand(c.Workdir)))
+        {
+            // web 类型托管的是这个目录：不存在就直接拒绝，避免静默托管空目录/用户目录
+            if (c.IsWeb)
+            {
+                Console.WriteLine("错误: web 类型的 --workdir（站点根目录）不存在: " + Launcher.Expand(c.Workdir));
+                return 2;
+            }
             Console.WriteLine("⚠ 注意: 执行目录当前不存在（仍会保存）: " + Launcher.Expand(c.Workdir));
+        }
+        if (c.IsWeb && c.Workdir.Length == 0)
+            Console.WriteLine("⚠ 注意: web 类型未指定 --workdir，将使用用户目录作为站点根目录");
 
         // 生成 GUID，保证 8 位 short id 不与现有记录冲突
         for (int t = 0; t < 8; t++)
@@ -202,14 +261,17 @@ internal static class CliApp
             Console.WriteLine("（没有命令。用 quickcmd add 注册，数据文件: " + Store.FilePath + "）");
             return 0;
         }
-        Console.WriteLine("SHORT     TITLE                  PROJ           MAX  RUN");
+        Console.WriteLine("SHORT     TITLE                  PROJ           TYPE  MAX  RUN");
         foreach (var c in list)
         {
-            var run = Trunc(c.KindText + (string.IsNullOrEmpty(c.Args) ? "" : " " + c.Args), 48);
+            var run = c.KindText + (string.IsNullOrEmpty(c.Args) ? "" : " " + c.Args);
+            if (c.IsWeb && !string.IsNullOrWhiteSpace(c.Url)) run = "→ " + c.Url + "   (" + run + ")";
+            run = Trunc(run, 64);
             Console.WriteLine(
                 c.ShortId.PadRight(10)
                 + Trunc(c.Title, 22).PadRight(24)
                 + Trunc(string.IsNullOrEmpty(c.Proj) ? "-" : c.Proj, 14).PadRight(16)
+                + (c.IsWeb ? "web" : "app").PadRight(6)
                 + c.MaxInstances.ToString().PadRight(6)
                 + run);
         }
@@ -227,7 +289,25 @@ internal static class CliApp
         return 0;
     }
 
-    private static int CmdUpdate(string[] a)
+    // web 命令的访问地址（agent 用：一条命令拿到 URL）
+    private static int CmdUrl(string[] a)
+    {
+        var o = Parse(a);
+        var list = Store.Load(out _);
+        var c = Resolver.Resolve(o.Positional.FirstOrDefault(), list, out var err);
+        if (c == null) { Console.WriteLine("错误: " + err); return 1; }
+        if (string.IsNullOrWhiteSpace(c.Url))
+        {
+            Console.WriteLine("错误: 「" + c.Title + "」没有 --url（update 时用 --url 设置）");
+            return 1;
+        }
+        Console.WriteLine(c.Url);
+        return 0;
+    }
+
+    private static int CmdUpdate(string[] a) => Store.WithWriteLock(() => CmdUpdateCore(a));
+
+    private static int CmdUpdateCore(string[] a)
     {
         var o = Parse(a);
         var unknown = o.Map.Keys.Where(k => !AddUpdateKeys.Contains(k)).ToList();
@@ -244,7 +324,7 @@ internal static class CliApp
         if (o.Has("title")) c.Title = (o.Value("title") ?? "").Trim();
         if (o.Has("proj")) c.Proj = (o.Value("proj") ?? "").Trim();
         if (o.Has("workdir")) c.Workdir = (o.Value("workdir") ?? "").Trim();
-        if (o.Has("program")) c.Program = (o.Value("program") ?? "").Trim();
+        if (o.Has("program")) c.Program = ResolveSelfProgram(o.Value("program"))?.Trim() ?? "";
         if (o.Has("shell-script")) c.ShellScript = (o.Value("shell-script") ?? "").Trim();
         if (o.Has("args")) c.Args = o.Value("args") ?? "";
         if (o.Has("interpreter")) c.Interpreter = (o.Value("interpreter") ?? "").Trim();
@@ -260,6 +340,27 @@ internal static class CliApp
         }
         if (o.Has("keep-open")) c.KeepOpen = true;
         if (o.Has("close-on-exit")) c.KeepOpen = false;
+
+        if (o.Has("type"))
+        {
+            var t = NormalizeType(o.Value("type"));
+            if (t == null) { Console.WriteLine("错误: --type 只支持 app（默认）或 web"); return 2; }
+            c.Type = t;
+        }
+        if (o.Has("url"))
+        {
+            var u = (o.Value("url") ?? "").Trim();
+            if (u.Length > 0 && !IsHttpUrl(u))
+            {
+                Console.WriteLine("错误: --url 必须是 http:// 或 https:// 开头的完整地址，实际: " + u);
+                return 2;
+            }
+            c.Url = u;
+        }
+        if (o.Has("auto-start")) c.AutoStart = true;
+        if (o.Has("no-auto-start")) c.AutoStart = false;
+        if (o.Has("capture-logs")) c.CaptureLogs = true;
+        if (o.Has("no-capture-logs")) c.CaptureLogs = false;
 
         if (string.IsNullOrWhiteSpace(c.Program) && string.IsNullOrWhiteSpace(c.ShellScript))
         {
@@ -281,6 +382,11 @@ internal static class CliApp
                 return 2;
             }
         }
+        if (c.IsWeb && c.Workdir.Length > 0 && !Directory.Exists(Launcher.Expand(c.Workdir)))
+        {
+            Console.WriteLine("错误: web 类型的 --workdir（站点根目录）不存在: " + Launcher.Expand(c.Workdir));
+            return 2;
+        }
 
         c.UpdatedAt = DateTime.Now;
         Store.SaveAll(list);
@@ -290,7 +396,9 @@ internal static class CliApp
         return 0;
     }
 
-    private static int CmdDelete(string[] a)
+    private static int CmdDelete(string[] a) => Store.WithWriteLock(() => CmdDeleteCore(a));
+
+    private static int CmdDeleteCore(string[] a)
     {
         var o = Parse(a);
         var list = Store.Load(out _);
@@ -342,6 +450,9 @@ internal static class CliApp
         }
 
         // 3) 兜底：直接启动（无 qchost 跟踪，run / run-job 行为相同）
+        //    CLI 启动完就退出，管道中继线程会被一起收走，所以这条路径不捕获日志。
+        if (c.CaptureLogs)
+            Console.WriteLine("⚠ 未经过 qchost：本次不捕获日志（--capture-logs 依赖 qchost 的 JOB 模式）");
         var proc = Launcher.Launch(c, out var err2);
         if (proc == null) { Console.WriteLine("错误: " + err2); return 1; }
         History.Append(new HistoryEntry
@@ -383,6 +494,7 @@ internal static class CliApp
             Workdir = x.Workdir,
             Env = x.Env,
             KeepOpen = x.KeepOpen,
+            CaptureLogs = x.CaptureLogs,
             Mode = string.IsNullOrWhiteSpace(x.Mode) ? "job" : x.Mode,
         };
 
@@ -390,6 +502,8 @@ internal static class CliApp
         {
             var def = Launcher.BuildAdHoc(msg, out var perr);
             if (def == null) { Console.WriteLine("错误: " + perr); return 2; }
+            if (def.CaptureLogs)
+                Console.WriteLine("⚠ 本地直启不捕获日志（--capture-logs 依赖 qchost 的 JOB 模式）");
             var proc = Launcher.Launch(def, out var lerr);
             History.Append(new HistoryEntry
             {
@@ -465,6 +579,7 @@ internal static class CliApp
         public string Program;
         public string Args;
         public bool KeepOpen;
+        public bool CaptureLogs;
         public bool Local;
     }
 
@@ -497,6 +612,7 @@ internal static class CliApp
                     case "program": r.Program = val ?? NextValue(a, ref i); break;
                     case "args": r.Args = val ?? NextValue(a, ref i); break;
                     case "keep-open": r.KeepOpen = true; break;
+                    case "capture-logs": r.CaptureLogs = true; break;
                     case "local": r.Local = true; break;
                     default: throw new ArgumentException("未知选项 --" + key + "（quickcmd help 查看 exec 选项）");
                 }
@@ -567,6 +683,128 @@ internal static class CliApp
                 + Trunc(e.CommandLine, 60));
         }
         Console.WriteLine("（共 " + list.Count + " 条；文件: " + History.FilePath + "）");
+        return 0;
+    }
+
+    // 输出日志：捕获型命令（--capture-logs）的 stdout/stderr。
+    //   quickcmd logs                   列出最近日志
+    //   quickcmd logs <key>             看某个命令/实例的最新日志（默认 60 行）
+    //   quickcmd logs <key> --tail 200  多取几行
+    //   quickcmd logs <key> --path      只打印文件路径（给编辑器/agent 用）
+    //   quickcmd logs <key> --clear -y  删除该命令的日志（不带 key 清空整个目录）
+    private static int CmdLogs(string[] a)
+    {
+        var o = Parse(a);
+        var key = o.Positional.FirstOrDefault();
+
+        if (o.Has("clear")) return ClearLogs(key, o.Has("yes"));
+
+        if (string.IsNullOrWhiteSpace(key))
+        {
+            var files = LogStore.List(20);
+            if (o.Has("json")) { Console.WriteLine(JsonSerializer.Serialize(files, Store.JsonOpts)); return 0; }
+            if (files.Count == 0)
+            {
+                Console.WriteLine("（还没有日志。给命令加 --capture-logs 后运行即可捕获 stdout/stderr）");
+                Console.WriteLine("目录: " + LogStore.Dir);
+                return 0;
+            }
+            Console.WriteLine("TIME           SIZE      FILE");
+            foreach (var f in files)
+                Console.WriteLine(
+                    f.Modified.ToString("MM-dd HH:mm:ss").PadRight(15)
+                    + f.SizeText.PadRight(10)
+                    + f.Name);
+            Console.WriteLine("（共 " + files.Count + " 个；目录: " + LogStore.Dir + "）");
+            Console.WriteLine("查看: quickcmd logs <short-id|实例ID> [--tail N]");
+            return 0;
+        }
+
+        var file = LogStore.Resolve(key, out var why);
+        if (file == null)
+        {
+            Console.WriteLine("错误: " + why);
+            return 1;
+        }
+        if (o.Has("json"))
+        {
+            Console.WriteLine(JsonSerializer.Serialize(file, Store.JsonOpts));
+            return 0;
+        }
+        if (o.Has("open"))
+        {
+            try { Process.Start(new ProcessStartInfo(file.Path) { UseShellExecute = true }); } catch { }
+        }
+        Console.WriteLine(file.Path);
+
+        int tail = 60;
+        if (o.Has("tail") && (!int.TryParse(o.Value("tail"), out tail) || tail <= 0))
+        {
+            Console.WriteLine("错误: --tail 需要 >0 的整数");
+            return 2;
+        }
+        if (o.Has("path")) return 0;
+
+        var text = LogStore.Tail(file.Path, tail);
+        if (text.Length == 0)
+        {
+            Console.WriteLine("（日志为空：命令可能还没输出，或还在缓冲）");
+            return 0;
+        }
+        Console.WriteLine("----- 最近 " + tail + " 行 -----");
+        Console.WriteLine(text);
+        return 0;
+    }
+
+    private static int ClearLogs(string key, bool yes)
+    {
+        if (!yes)
+        {
+            Console.WriteLine("删除日志不可撤销：确认请加 -y");
+            return 1;
+        }
+        var files = new List<LogFile>();
+        if (string.IsNullOrWhiteSpace(key))
+        {
+            files = LogStore.List(0);
+        }
+        else
+        {
+            var list = Store.Load(out _);
+            var c = Resolver.Resolve(key, list, out _);
+            var prefix = c != null ? LogStore.Key(c) : key.Trim();
+            files = LogStore.List(0)
+                .Where(f => f.Name.StartsWith(prefix + "-", StringComparison.OrdinalIgnoreCase)
+                         || string.Equals(f.Name, prefix, StringComparison.OrdinalIgnoreCase))
+                .ToList();
+        }
+        var n = 0;
+        foreach (var f in files) { try { File.Delete(f.Path); n++; } catch { } }
+        Console.WriteLine("已删除 " + n + " 个日志文件（目录: " + LogStore.Dir + "）");
+        return 0;
+    }
+
+    // 打开本地 Web 控制台：确保 qchost 在线，向它要 URL（默认 http://127.0.0.1:41777/，
+    // 端口被占用时宿主会顺延并写回 settings.json）
+    private static int CmdUi(string[] a)
+    {
+        var o = Parse(a);
+        if (!Ipc.EnsureHost(500, 5000))
+        {
+            Console.WriteLine("错误: qchost 未运行且自动拉起失败");
+            return 1;
+        }
+        int r = Ipc.TryCall(new IpcMessage { Op = "ui" }, 1500, out var resp, out var failReason);
+        if (r != 0 || resp == null || !resp.Ok)
+        {
+            Console.WriteLine("错误: " + (resp?.Message ?? failReason ?? "qchost 无响应"));
+            return 1;
+        }
+        Console.WriteLine(resp.Message);
+        if (!o.Has("no-open"))
+        {
+            try { Process.Start(new ProcessStartInfo(resp.Message) { UseShellExecute = true }); } catch { }
+        }
         return 0;
     }
 
@@ -662,7 +900,8 @@ internal static class CliApp
                 + inst.Started.ToString("HH:mm:ss").PadRight(12)
                 + dur.PadRight(12)
                 + (inst.ShortId ?? "").PadRight(10)
-                + (string.IsNullOrWhiteSpace(inst.Proj) ? "" : inst.Proj + " > ") + inst.Title);
+                + (string.IsNullOrWhiteSpace(inst.Proj) ? "" : inst.Proj + " > ") + inst.Title
+                + (string.IsNullOrWhiteSpace(inst.Url) ? "" : "  ·  " + inst.Url));
             PrintProcTree(inst);
         }
         Console.WriteLine("（共 " + list.Count + " 个实例。结束: quickcmd kill <ID>——[JOB] 击杀整棵作业树；* = root 已退出，存活靠作业）");
@@ -756,6 +995,9 @@ internal static class CliApp
         Console.WriteLine("  short    : " + c.ShortId);
         Console.WriteLine("  id       : " + c.Id);
         Console.WriteLine("  title    : " + c.Title);
+        Console.WriteLine("  type     : " + (c.IsWeb ? "web（网站/常驻服务）" : "app（普通程序）"));
+        if (!string.IsNullOrWhiteSpace(c.Url)) Console.WriteLine("  url      : " + c.Url);
+        if (c.AutoStart) Console.WriteLine("  auto     : qchost 启动时自动拉起");
         Console.WriteLine("  proj     : " + (string.IsNullOrEmpty(c.Proj) ? "(空)" : c.Proj));
         Console.WriteLine("  workdir  : " + (string.IsNullOrEmpty(c.Workdir) ? "(默认=用户目录)" : c.Workdir));
         Console.WriteLine("  run      : " + c.KindText + (string.IsNullOrEmpty(c.Args) ? "" : "  " + c.Args));
@@ -763,6 +1005,7 @@ internal static class CliApp
             ? (string.IsNullOrWhiteSpace(c.ShellScript) ? "(不适用)" : "(默认: 按扩展名 → 系统 PATH)")
             : c.Interpreter));
         Console.WriteLine("  keep     : " + (c.KeepOpen ? "窗口保持" : "退出即关"));
+        if (c.CaptureLogs) Console.WriteLine("  logs     : 捕获输出 → " + LogStore.Dir + "（无控制台窗口）");
         Console.WriteLine("  env      : " + (c.Env.Count == 0 ? "(无)" : string.Join("  ", c.Env)));
         Console.WriteLine("  max      : " + c.MaxInstances);
         Console.WriteLine("  updated  : " + c.UpdatedAt.ToString("yyyy-MM-dd HH:mm:ss"));
@@ -801,6 +1044,11 @@ qchost（quick command host）= 常驻托盘的宿主进程 qchost.exe：负责�
   quickcmd run <short-id|id|title>         以 [PID] 模式运行（按 root pid 进程树跟踪）
   quickcmd run-job <short-id|id|title>     以 [JOB] 模式运行（作业对象整树跟踪，推荐）
   quickcmd exec [选项] -- <命令行>          免注册直跑（经 qchost 出沙盒，自动记入审计历史）
+  quickcmd serve [--dir <目录>] --port <端口> [--spa]
+                                           内置静态文件服务（前台运行，仅绑定 127.0.0.1）
+  quickcmd url <short-id|id|title>         打印 web 命令的访问地址
+  quickcmd logs [<key>] [--tail N]         查看输出日志（清单 / 某命令或实例的最新日志）
+  quickcmd ui [--no-open]                  打开本地 Web 控制台（默认浏览器；--no-open 只打印 URL）
   quickcmd history [--limit N] [--grep 文本] [--json] [--clear -y]
                                            查看/导出/清空执行审计历史（默认最近 20 条）
   quickcmd host [status|stop|restart]      管理常驻宿主 qchost（升级/排障用）
@@ -822,6 +1070,11 @@ add / update 选项:
   --interpreter <路径...>  解释器查找顺序覆盖（';' 分隔文件/目录，按顺序，最后落系统 PATH），
                            用于解释器多版本场景，如 --interpreter "D:\py312;D:\py311"
   --max-instances <N>      并发实例上限，默认 1（已到上限再点击会置前现有实例）
+  --type web               标记为网站/常驻服务（默认 app）；托盘“网站”菜单与后续面板显示 URL 和状态
+  --url <地址>             web 类型的访问地址（须 http:// 或 https://），如 http://127.0.0.1:41001/
+  --auto-start             web 类型：qchost 启动时自动拉起（默认不自动）
+  --capture-logs           捕获 stdout/stderr 到日志文件（%APPDATA%\quickcmd\logs，不显示控制台窗口）
+                           适合 serve / dev server 这类常驻服务；交互式命令不要开
   --close-on-exit          命令结束后关闭窗口（默认保持窗口: python 用 -i、ps1 用 -NoExit、bat 用 /k）
 
 exec 选项（写在 -- 之前）:
@@ -832,6 +1085,7 @@ exec 选项（写在 -- 之前）:
   --program <程序>         直接启动程序（与 -- 之后的命令行二选一）
   --args <参数>            --program 的附加参数
   --keep-open              窗口保持（cmd /k；默认 /c 跑完即退）
+  --capture-logs           捕获 stdout/stderr 到日志文件（之后用 quickcmd logs 查看）
   --local                  显式降级为当前进程直启：可能受调用方沙盒限制，且不进托盘实例
   说明: exec 默认必须经 qchost（常驻托盘，出沙盒）；qchost 不在时命令失败（退出码 3），
         不会静默在沙盒内直接执行。-- 之后的整行原样交给 cmd。
@@ -840,6 +1094,12 @@ exec 选项（写在 -- 之前）:
   quickcmd add --title "Dev Server" --proj myapp --workdir D:\code\myapp --program "npm" --args "run dev"
   quickcmd add --title "数据同步" --workdir D:\jobs --shell-script D:\jobs\sync.py --interpreter "D:\py312;D:\py311"
   quickcmd add --title "记事本" --program notepad.exe --max-instances 2
+  quickcmd add --type web --title "站点预览" --url http://127.0.0.1:41001/ --workdir D:\\out ^
+    --program quickcmd --args "serve --port 41001 --spa" --capture-logs
+  quickcmd serve --port 41001 --spa          # 直接前台起一个静态服务
+  quickcmd url 1a2b3c4d
+  quickcmd logs 1a2b3c4d --tail 100          # 看该命令最近一次运行的输出
+  quickcmd logs                              # 列出最近的日志
   quickcmd update 1a2b3c4d --max-instances 3
   quickcmd run 1a2b3c4d          # [PID] 模式
   quickcmd run-job 1a2b3c4d      # [JOB] 模式
@@ -850,6 +1110,9 @@ exec 选项（写在 -- 之前）:
 
 说明:
   - short id 是 GUID 前 8 位；get/update/delete/run/run-job 都可用 short-id、完整 id 或 title 定位
+  - --type web 只是标记（托盘/面板据此显示 URL 与运行状态），不改变执行方式；
+    静态托管用内置 serve：--program quickcmd 会在 add 时解析成 quickcmd.exe 绝对路径，
+    站点根目录就是 --workdir（web 类型要求它已存在）
   - run / run-job 把请求交给常驻 qchost（实例可跟踪管理，托盘菜单中以 [PID]/[JOB] 标注模式）；
      qchost 未运行时自动拉起 qchost.exe 再执行；找不到/拉不起 qchost 才退回直接启动（不跟踪）
    - 手动启动 qchost：直接运行 qchost.exe（无参数，单实例互斥）

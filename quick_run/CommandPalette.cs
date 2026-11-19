@@ -38,7 +38,7 @@ internal sealed class CommandPaletteForm : Form
         _paletteIconCache = new Dictionary<string, Icon>();
 
         // Form 设置
-        this.Text = "Command Palette";
+        this.Text = "Command Palette   —   Enter 运行 · Ctrl+Enter 打开网站";
         this.FormBorderStyle = FormBorderStyle.FixedSingle;
         this.StartPosition = FormStartPosition.CenterScreen;
         this.Size = new Size(600, 450);
@@ -75,7 +75,8 @@ internal sealed class CommandPaletteForm : Form
             }
             else if (e.KeyCode == Keys.Enter)
             {
-                SubmitSelected();
+                if (e.Control) OpenSelectedUrl();
+                else SubmitSelected();
                 e.Handled = true;
             }
             else if (e.KeyCode == Keys.Escape)
@@ -104,7 +105,8 @@ internal sealed class CommandPaletteForm : Form
         {
             if (e.KeyCode == Keys.Enter)
             {
-                SubmitSelected();
+                if (e.Control) OpenSelectedUrl();
+                else SubmitSelected();
                 e.Handled = true;
             }
             else if (e.KeyCode == Keys.Escape)
@@ -196,6 +198,15 @@ internal sealed class CommandPaletteForm : Form
         }
     }
 
+    // Ctrl+Enter：直接打开 web 命令的 URL（不启动、不改状态）
+    private void OpenSelectedUrl()
+    {
+        if (_commandList.SelectedItem is CommandDef cmd && !string.IsNullOrWhiteSpace(cmd.Url))
+        {
+            try { Process.Start(new ProcessStartInfo(cmd.Url) { UseShellExecute = true }); } catch { }
+        }
+    }
+
     private void FilterCommands()
     {
         var query = _searchBox.Text.ToLowerInvariant();
@@ -248,7 +259,8 @@ internal sealed class CommandPaletteForm : Form
         e.Graphics.DrawString(title, new Font("Segoe UI", 10f, FontStyle.Bold), titleBrush, titleRect);
 
         // 绘制命令类型
-        var subtitle = cmd.KindText;
+        var subtitle = (cmd.IsWeb ? "[网站] " : "") + cmd.KindText
+            + (string.IsNullOrWhiteSpace(cmd.Url) ? "" : "   ·   " + cmd.Url);
         var subtitleRect = new Rectangle(e.Bounds.X + 5 + iconOffset, e.Bounds.Y + 27, e.Bounds.Width - 10 - iconOffset, 15);
         e.Graphics.DrawString(subtitle, new Font("Segoe UI", 8f), grayBrush, subtitleRect);
 

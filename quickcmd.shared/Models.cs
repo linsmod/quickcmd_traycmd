@@ -21,6 +21,10 @@ internal sealed class CommandDef
     public string ShellScript { get; set; } = "";                  // 脚本文件：按扩展名选解释器 .py/.pyw→python(pythonw) .bat/.cmd→cmd .ps1→pwsh
     public string Args { get; set; } = "";                         // 附加参数（program / shell_script 共用）
     public string Interpreter { get; set; } = "";                  // 解释器查找顺序覆盖：';' 分隔的文件/目录，按顺序，最后落系统 PATH
+    public string Type { get; set; } = "";                         // 空/"app" = 普通程序；"web" = 网站/常驻服务（托盘/面板显示 URL 与状态）
+    public string Url { get; set; } = "";                          // web 类型的访问地址（展示/打开用，如 http://127.0.0.1:41001/）
+    public bool AutoStart { get; set; }                            // web 类型：qchost 启动时自动拉起（默认不自动启动）
+    public bool CaptureLogs { get; set; }                          // 捕获 stdout/stderr 到 %APPDATA%\quickcmd\logs（服务型命令用；不显示控制台窗口）
     public int MaxInstances { get; set; } = 1;                     // 并发实例上限
     public bool KeepOpen { get; set; } = true;                     // 命令结束后是否保持窗口
     public DateTime CreatedAt { get; set; } = DateTime.Now;
@@ -31,6 +35,8 @@ internal sealed class CommandDef
     public Dictionary<string, JsonElement> Extra { get; set; }
 
     public string ShortId => Id.Length >= 8 ? Id.Substring(0, 8) : Id;
+
+    public bool IsWeb => string.Equals(Type, "web", StringComparison.OrdinalIgnoreCase);
 
     public string KindText =>
         !string.IsNullOrWhiteSpace(ShellScript) ? "script: " + ShellScript
@@ -55,6 +61,7 @@ internal sealed class IpcMessage
     public string Workdir { get; set; }       // exec: 执行目录（空 = 用户目录）
     public List<string> Env { get; set; }     // exec: "KEY=VAL" 列表
     public bool KeepOpen { get; set; }        // exec: cmd /k 保持窗口（默认 /c 跑完即退）
+    public bool CaptureLogs { get; set; }     // exec: 捕获 stdout/stderr 到日志文件（quickcmd logs 查看）
 }
 
 // qchost（常驻托盘宿主）对 IPC 请求的应答
@@ -75,6 +82,10 @@ internal sealed class InstanceInfo
     public string ShortId { get; set; }   // 所属命令定义 short id
     public string Title { get; set; }
     public string Proj { get; set; }
+    public string Type { get; set; }      // 命令类型（web = 网站/常驻服务）
+    public string Url { get; set; }       // web 类型的访问地址（托盘/面板"打开"用）
+    public string LogPath { get; set; }   // 输出日志文件（仅 CaptureLogs 命令；空 = 未捕获）
+    public int Pid { get; set; }          // root 启动 pid（JOB 模式下可能已退出）
     public DateTime Started { get; set; }
     public bool RootExited { get; set; }  // JOB 模式 root 已退、树靠作业续命
     public List<ProcNode> Tree { get; set; } = new();
@@ -112,5 +123,6 @@ internal sealed class HistoryEntry
     public long DurationMs { get; set; } = -1;
     public string Error { get; set; } = "";
     public int RequesterPid { get; set; }                     // 发起请求的进程（CLI / 托盘）
+    public string LogPath { get; set; } = "";                 // 捕获型执行（CaptureLogs）的输出日志文件
 }
 

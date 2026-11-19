@@ -192,6 +192,16 @@ public sealed class TrayContext : ApplicationContext
                     _menu.Items.Add(BuildInstanceItem(i, list));
         }
 
+        var webDefs = list.Where(c => c.IsWeb).OrderBy(c => c.Proj).ThenBy(c => c.Title).ToList();
+        if (webDefs.Count > 0)
+        {
+            _menu.Items.Add(new ToolStripSeparator());
+            var sitesItem = new ToolStripMenuItem("网站");
+            foreach (var c in webDefs)
+                sitesItem.DropDownItems.Add(BuildSiteItem(c, snap));
+            _menu.Items.Add(sitesItem);
+        }
+
         _menu.Items.Add(new ToolStripSeparator());
         var dataItem = new ToolStripMenuItem("打开数据文件");
         dataItem.Click += (s, e) =>
@@ -206,6 +216,21 @@ public sealed class TrayContext : ApplicationContext
             catch { }
         };
         _menu.Items.Add(dataItem);
+
+        var logsDir = new ToolStripMenuItem("打开日志目录");
+        logsDir.Click += (s, e) =>
+        {
+            try { Directory.CreateDirectory(LogStore.Dir); } catch { }
+            try
+            {
+                Process.Start(new ProcessStartInfo("explorer.exe", "\"" + LogStore.Dir + "\"")
+                {
+                    UseShellExecute = true,
+                });
+            }
+            catch { }
+        };
+        _menu.Items.Add(logsDir);
 
         // 执行审计：最近 8 条 + 打开/清空历史文件
         var histItem = new ToolStripMenuItem("历史记录");
@@ -250,10 +275,20 @@ public sealed class TrayContext : ApplicationContext
         histItem.DropDownItems.Add(clearHist);
         _menu.Items.Add(histItem);
 
+        var consoleItem = new ToolStripMenuItem("打开控制台（浏览器）");
+        consoleItem.Click += (s, e) => OpenConsole();
+        _menu.Items.Add(consoleItem);
+
         var skillItem = new ToolStripMenuItem(SkillResource.Available() ? "安装 Agent Skill" : "安装 Agent Skill（不可用）");
         skillItem.Enabled = SkillResource.Available();
         skillItem.Click += (s, e) => InstallSkillFromMenu();
         _menu.Items.Add(skillItem);
+
+        // 复制 skill 内容到剪贴板：方便直接粘给别的 agent / 聊天窗口
+        var copySkill = new ToolStripMenuItem("复制 Skill 文件");
+        copySkill.Enabled = SkillResource.Exists() || SkillResource.Available();
+        copySkill.Click += (s, e) => CopySkillFile();
+        _menu.Items.Add(copySkill);
 
         var startupItem = new ToolStripMenuItem("开机启动")
         {
@@ -294,6 +329,132 @@ public sealed class TrayContext : ApplicationContext
             ok ? MessageBoxIcon.Information : MessageBoxIcon.Warning);
     }
 
+    // 托盘"复制 Skill 文件"：把 SKILL.md 内容放进剪贴板（优先已安装那份，没装用内嵌版），
+    // 方便直接粘给其他 agent / 聊天窗口
+    private void CopySkillFile()
+    {
+        string text = null;
+        var installed = false;
+        try
+        {
+            if (SkillResource.Exists())
+            {
+                text = File.ReadAllText(SkillResource.TargetFile, Encoding.UTF8);
+                installed = true;
+            }
+        }
+        catch { }
+        if (string.IsNullOrEmpty(text))
+        {
+            text = SkillResource.LoadText();
+            installed = false;
+        }
+        if (string.IsNullOrEmpty(text)) { Toast("没有可复制的 Skill 内容"); return; }
+        try
+        {
+            Clipboard.SetText(text);
+            Toast((installed ? "已复制安装版 SKILL.md" : "已复制内嵌版 SKILL.md")
+                + "（" + text.Length + " 字符）");
+        }
+        catch (Exception ex) { Toast("复制失败: " + ex.Message); }
+    }
+
+    // 轻提示：托盘气泡（比 MessageBox 更适合"做完了"这类反馈）
+    private void Toast(string text)
+    {
+        try
+        {
+            _ni.BalloonTipTitle = "quickcmd";
+            _ni.BalloonTipText = text;
+            _ni.BalloonTipIcon = ToolTipIcon.Info;
+            _ni.ShowBalloonTip(2500);
+        }
+        catch { }
+    }
+
+    // 网站（web 类型）菜单：● 运行中 / ○ 已停止；运行中可打开 URL、复制链接、停止，
+    // 已停止可启动。qchost 未连接时启动项灰显（实例只存在于宿主进程内）。
+    private ToolStripMenuItem BuildSiteItem(CommandDef c, List<InstanceInfo> snap)
+    {
+        var inst = snap.FirstOrDefault(x =>
+            string.Equals(x.ShortId, c.ShortId, StringComparison.OrdinalIgnoreCase));
+        var running = inst != null;
+        var hasUrl = !string.IsNullOrWhiteSpace(c.Url);
+
+        var label = (running ? "● " : "○ ")
+            + (string.IsNullOrWhiteSpace(c.Proj) ? "" : c.Proj.Trim() + " > ") + c.Title
+            + (hasUrl ? "  ·  " + c.Url : "");
+        var item = new ToolStripMenuItem(label);
+
+        if (running)
+        {
+            item.DropDownItems.Add(UrlItem("在浏览器打开", c.Url));
+            item.DropDownItems.Add(UrlItem("复制 URL", c.Url, copy: true));
+            item.DropDownItems.Add(new ToolStripSeparator());
+            var stop = new ToolStripMenuItem("停止");
+            stop.Click += (s, e) => KillInstance(inst.Id);
+            item.DropDownItems.Add(stop);
+        }
+        else
+        {
+            var start = new ToolStripMenuItem("启动") { Enabled = _hostUp };
+            start.Click += (s, e) => RunCommand(c);
+            item.DropDownItems.Add(start);
+            item.DropDownItems.Add(UrlItem("复制 URL", c.Url, copy: true));
+        }
+
+        if (c.CaptureLogs)
+        {
+            var latest = LogStore.Latest(LogStore.Key(c));
+            item.DropDownItems.Add(LogItem(running ? inst.LogPath : latest?.Path));
+        }
+        return item;
+    }
+
+    private ToolStripMenuItem UrlItem(string text, string url, bool copy = false)
+    {
+        var mi = new ToolStripMenuItem(text) { Enabled = !string.IsNullOrWhiteSpace(url) };
+        if (copy) mi.Click += (s, e) => CopyUrl(url);
+        else mi.Click += (s, e) => OpenUrl(url);
+        return mi;
+    }
+
+    private static void OpenUrl(string url)
+    {
+        if (string.IsNullOrWhiteSpace(url)) return;
+        try { Process.Start(new ProcessStartInfo(url) { UseShellExecute = true }); } catch { }
+    }
+
+    private static void CopyUrl(string url)
+    {
+        if (string.IsNullOrWhiteSpace(url)) return;
+        try { Clipboard.SetText(url); } catch { }
+    }
+
+    // 日志项：用系统默认程序打开日志文件（.log 通常记事本/VS Code）；没有日志时灰显
+    private static ToolStripMenuItem LogItem(string path)
+    {
+        var mi = new ToolStripMenuItem("查看日志") { Enabled = LogStore.Exists(path) };
+        mi.Click += (s, e) =>
+        {
+            try { Process.Start(new ProcessStartInfo(path) { UseShellExecute = true }); } catch { }
+        };
+        return mi;
+    }
+
+    // 控制台 URL 由 qchost 提供（端口可能顺延），拿不到就提示
+    private void OpenConsole()
+    {
+        int r = Call(new IpcMessage { Op = "ui" }, 1500, out var resp);
+        if (r != 0 || resp == null || !resp.Ok)
+        {
+            MessageBox.Show("控制台不可用：" + (resp?.Message ?? "qchost 未连接"),
+                "quickcmd", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            return;
+        }
+        OpenUrl(resp.Message);
+    }
+
     // 实例项（第一级）：前缀直接是实例 ID —— JOB = "[job-N]"，PID = "[pid]"；
     // 后跟**当前活跃 pid**（root 启动 pid 可能已退）· 时长 · root已退标记；
     // 展开 = 结束任务 / 打开文件所在位置 / 打开工作目录
@@ -328,6 +489,14 @@ public sealed class TrayContext : ApplicationContext
         var kill = new ToolStripMenuItem("结束任务" + (i.Mode == "JOB" ? "（整棵作业树）" : "（进程树）"));
         kill.Click += (s, e) => KillInstance(i.Id);
         item.DropDownItems.Add(kill);
+
+        if (cmd != null && !string.IsNullOrWhiteSpace(cmd.Url))
+        {
+            item.DropDownItems.Add(UrlItem("在浏览器打开", cmd.Url));
+            item.DropDownItems.Add(UrlItem("复制 URL", cmd.Url, copy: true));
+        }
+
+        item.DropDownItems.Add(LogItem(i.LogPath));
 
         var fileItem = new ToolStripMenuItem("打开文件所在位置");
         var filePath = ResolveTargetFile(i, cmd);

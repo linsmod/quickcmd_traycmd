@@ -64,7 +64,7 @@ quickcmd host restart
 | `timestamp` | 本地时间（人工对表用） |
 | `event` | `start` / `finish` |
 | `kind` | `run`（注册项）/ `exec`（免注册直跑） |
-| `source` | `cli` / `palette`（命令面板）/ `qchost`（finish）/ `cli-local`（显式本地兜底） |
+| `source` | `cli` / `palette`（命令面板）/ `webui`（本地控制台）/ `qchost`（finish）/ `qchost-auto`（宿主自动拉起）/ `cli-local`（显式本地兜底） |
 | `execId` | 关联一次执行：注册项 = 命令 Id；直跑 = `adhoc-<hex>` |
 | `title` / `shortId` | 注册项标题 / short id（直跑为 adhoc 前缀） |
 | `commandLine` | 实际执行的命令行（含解释器/包装） |
@@ -73,6 +73,7 @@ quickcmd host restart
 | `exitCode` | root 退出码（未知 = `int.MinValue`）|
 | `durationMs` | 从启动到结束（finish 事件）|
 | `requesterPid` | 发起执行的 CLI/托盘进程 |
+| `logPath` | 捕获型执行（`--capture-logs`）的输出日志；空 = 未捕获 |
 
 实现要点：
 

@@ -24,6 +24,7 @@ internal sealed class Instance
     public int ExitCode = int.MinValue; // root 退出码（拿不到保持 MinValue）
     public int RequesterPid;  // 发起这次执行的 CLI/托盘进程（审计 finish 也带上）
     public string ModeName;   // 创建时的跟踪模式快照（kill 会先释放 Job，事后取会误判成 PID）
+    public string LogPath;    // 捕获输出时的日志文件（null = 未捕获）
 
     public void ReleaseJob()
     {
@@ -142,6 +143,10 @@ internal static class Manager
                 ShortId = i.Cmd.ShortId,
                 Title = i.Cmd.Title,
                 Proj = i.Cmd.Proj,
+                Type = i.Cmd.Type,
+                Url = i.Cmd.Url,
+                LogPath = i.LogPath,
+                Pid = i.Pid,
                 Started = i.Started,
                 RootExited = i.Job != null && !members.Contains(i.Pid),
                 Tree = tree,
@@ -266,6 +271,7 @@ internal static class Manager
                 Pid = i.Pid,
                 Status = status,
                 ExitCode = i.ExitCode,
+                LogPath = i.LogPath ?? "",
                 DurationMs = (long)Math.Max(0, (DateTime.Now - i.Started).TotalMilliseconds),
                 RequesterPid = i.RequesterPid,
             }, out _);
@@ -281,9 +287,10 @@ internal static class Manager
     // 返回 false 时 error=="max" 表示已达实例上限（已自动置前现有实例）；
     // 成功时 mode 为实际生效的跟踪模式："JOB"（作业整树）或 "PID"（root pid 树，
     // 含 useJob=true 但作业不可用而退化时）
-    public static bool Start(CommandDef cmd, bool useJob, int requesterPid, out string error, out int pid, out string mode, out string id)
+    public static bool Start(CommandDef cmd, bool useJob, int requesterPid,
+        out string error, out int pid, out string mode, out string id, out string logPath)
     {
-        error = ""; pid = 0; mode = ""; id = "";
+        error = ""; pid = 0; mode = ""; id = ""; logPath = null;
 
         var live = ForCommand(cmd.Id);
         if (live.Count >= Math.Max(1, cmd.MaxInstances))
@@ -294,7 +301,10 @@ internal static class Manager
             return false;
         }
 
-        var res = Launcher.LaunchTracked(cmd, useJob, out var err);
+        var wanted = cmd.CaptureLogs ? LogStore.NewPath(cmd) : null;
+        if (wanted != null) LogStore.Prune();
+
+        var res = Launcher.LaunchTracked(cmd, useJob, wanted, out var err);
         if (res == null) { error = err; return false; }
 
         var inst = new Instance
@@ -303,11 +313,13 @@ internal static class Manager
             Id = res.Job != null ? res.Job.Id : res.Pid.ToString(),
             RequesterPid = requesterPid,
             ModeName = res.Job != null ? "JOB" : "PID",
+            LogPath = res.LogPath,
         };
         lock (Gate) Instances.Add(inst);
         pid = inst.Pid;
         mode = ModeOf(inst);
         id = inst.Id;
+        logPath = inst.LogPath;
         Notify("quickcmd", "已启动「" + cmd.Title + "」 [" + mode + "] " + inst.Id);
 
         // 后台寻找窗口句柄（窗口可能要过一会儿才出现）

@@ -48,8 +48,10 @@ internal sealed class Job : IDisposable
     // 必须在恢复前指派：否则 launcher 可能在入作业前就 fork 出界外子进程。
     // 返回 false 时进程未被启动（或已被终止），win32Error 为原因；
     // 指派失败的典型原因：quickcmd 自身已在别的作业里，新进程出生即属那个作业。
+    // logPath 非空 = 捕获输出：stdout/stderr 直接指向日志文件（子进程自己写，无中继
+    // 线程，管道缓冲区满也不会阻塞服务），同时 CREATE_NO_WINDOW 隐藏控制台窗口。
     public bool TryLaunch(string fileName, string args, string workdir,
-        Dictionary<string, string> envOverrides, out int pid, out uint win32Error)
+        Dictionary<string, string> envOverrides, string logPath, out int pid, out uint win32Error)
     {
         pid = 0; win32Error = 0;
         if (Handle == IntPtr.Zero) { win32Error = 6 /*ERROR_INVALID_HANDLE*/; return false; }
@@ -59,9 +61,27 @@ internal sealed class Job : IDisposable
         IntPtr envBlock = BuildEnvBlock(envOverrides);
         uint flags = Native.CREATE_SUSPENDED;
         if (envBlock != IntPtr.Zero) flags |= Native.CREATE_UNICODE_ENVIRONMENT;
+
+        IntPtr hOut = IntPtr.Zero, hIn = IntPtr.Zero;
+        bool capture = !string.IsNullOrEmpty(logPath);
+        if (capture)
+        {
+            hOut = LogStore.OpenInheritableAppend(logPath);
+            if (hOut == IntPtr.Zero) capture = false; // 打不开日志就退回可见窗口，别让命令起不来
+            else
+            {
+                hIn = LogStore.OpenInheritableRead("NUL");
+                si.dwFlags |= (int)Native.STARTF_USESTDHANDLES;
+                si.hStdInput = hIn;
+                si.hStdOutput = hOut;
+                si.hStdError = hOut; // 合并到同一文件：时间顺序对得上，tail 一个就够
+                flags |= Native.CREATE_NO_WINDOW;
+            }
+        }
+
         try
         {
-            if (!Native.CreateProcessW(null, cmdLine, IntPtr.Zero, IntPtr.Zero, false,
+            if (!Native.CreateProcessW(null, cmdLine, IntPtr.Zero, IntPtr.Zero, capture,
                     flags, envBlock, workdir, ref si, out var pi))
             { win32Error = (uint)Marshal.GetLastWin32Error(); return false; }
 
@@ -81,7 +101,12 @@ internal sealed class Job : IDisposable
             pid = pi.dwProcessId;
             return true;
         }
-        finally { if (envBlock != IntPtr.Zero) Marshal.FreeHGlobal(envBlock); }
+        finally
+        {
+            if (hIn != IntPtr.Zero) Native.CloseHandle(hIn);
+            if (hOut != IntPtr.Zero) Native.CloseHandle(hOut); // 子进程已持有自己的副本
+            if (envBlock != IntPtr.Zero) Marshal.FreeHGlobal(envBlock);
+        }
     }
 
     // 作业内最后一个进程已退出。

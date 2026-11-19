@@ -84,10 +84,89 @@ internal static class Store
         File.Move(tmp, FilePath, true); // 原子替换，避免 CLI / qchost 读到半截文件
     }
 
+    // 读-改-写 串行化：CLI 的 add/update/delete 都是 Load → 修改 → SaveAll，
+    // 两个进程（CLI / 面板）同时写会互相覆盖。用命名互斥体把整段包起来；
+    // 上一个持有者崩溃时 WaitOne 抛 AbandonedMutexException，视为已获得锁。
+    public static T WithWriteLock<T>(Func<T> body)
+    {
+        using var mutex = new Mutex(false, MutexName);
+        var locked = false;
+        try
+        {
+            try { locked = mutex.WaitOne(10000); }
+            catch (AbandonedMutexException) { locked = true; }
+            return body();
+        }
+        finally { if (locked) { try { mutex.ReleaseMutex(); } catch { } } }
+    }
+
+    private const string MutexName = @"Local\quickcmd-store";
+
     public static void EnsureFile()
     {
         Directory.CreateDirectory(Dir);
         if (!File.Exists(FilePath)) File.WriteAllText(FilePath, "", new UTF8Encoding(false));
     }
+
+    // ----- 应用设置（settings.json：控制台端口 + 首页固定项）-----
+
+    public static string SettingsPath => Path.Combine(Dir, "settings.json");
+
+    public const int DefaultUiPort = 41777;
+
+    public static AppSettings LoadSettings()
+    {
+        try
+        {
+            if (!File.Exists(SettingsPath)) return new AppSettings();
+            var s = JsonSerializer.Deserialize<AppSettings>(File.ReadAllText(SettingsPath), JsonOpts);
+            if (s == null) return new AppSettings();
+            if (s.UiPort <= 1024 || s.UiPort >= 65536) s.UiPort = DefaultUiPort;
+            s.Pinned ??= new List<string>();
+            return s;
+        }
+        catch { return new AppSettings(); }
+    }
+
+    public static void SaveSettings(AppSettings s)
+    {
+        try
+        {
+            Directory.CreateDirectory(Dir);
+            var tmp = SettingsPath + ".tmp";
+            File.WriteAllText(tmp, JsonSerializer.Serialize(s, JsonOpts), new UTF8Encoding(false));
+            File.Move(tmp, SettingsPath, true); // 原子替换
+        }
+        catch { }
+    }
+
+    public static int LoadUiPort() => LoadSettings().UiPort;
+
+    // 保留固定项：端口顺延写回时不能把 pinned 覆盖掉
+    public static void SaveUiPort(int port) => WithWriteLock(() =>
+    {
+        var s = LoadSettings();
+        s.UiPort = port;
+        SaveSettings(s);
+        return 0;
+    });
+
+    // 首页固定项：shortId 列表（按固定顺序显示）。返回最新列表。
+    public static List<string> SetPinned(string shortId, bool pinned) => WithWriteLock(() =>
+    {
+        var s = LoadSettings();
+        var list = s.Pinned ?? new List<string>();
+        list.RemoveAll(x => string.Equals(x, shortId, StringComparison.OrdinalIgnoreCase));
+        if (pinned) list.Add(shortId);
+        s.Pinned = list;
+        SaveSettings(s);
+        return list;
+    });
+}
+
+internal sealed class AppSettings
+{
+    public int UiPort { get; set; } = Store.DefaultUiPort;
+    public List<string> Pinned { get; set; } = new(); // 首页固定项的 ShortId
 }
 

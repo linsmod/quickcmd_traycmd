@@ -43,6 +43,29 @@ internal static class Native
         public int dwThreadId;
     }
 
+    [StructLayout(LayoutKind.Sequential)]
+    public struct SECURITY_ATTRIBUTES
+    {
+        public int nLength;
+        public IntPtr lpSecurityDescriptor;
+        public bool bInheritHandle;
+    }
+
+    // ---- 日志捕获：可继承的文件句柄（子进程直接写文件，不经过管道，不会因缓冲区满而阻塞）----
+    public const uint GENERIC_READ = 0x80000000;
+    public const uint FILE_APPEND_DATA = 0x00000004;
+    public const uint FILE_SHARE_READ = 0x00000001;
+    public const uint FILE_SHARE_WRITE = 0x00000002;
+    public const uint FILE_SHARE_DELETE = 0x00000004;
+    public const uint OPEN_EXISTING = 3;
+    public const uint OPEN_ALWAYS = 4;
+    public const uint FILE_ATTRIBUTE_NORMAL = 0x00000080;
+
+    [DllImport("kernel32.dll", SetLastError = true, CharSet = CharSet.Unicode)]
+    public static extern IntPtr CreateFileW(string lpFileName, uint dwDesiredAccess, uint dwShareMode,
+        ref SECURITY_ATTRIBUTES lpSecurityAttributes, uint dwCreationDisposition,
+        uint dwFlagsAndAttributes, IntPtr hTemplateFile);
+
     [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
     public struct STARTUPINFOW
     {
@@ -99,6 +122,8 @@ internal static class Native
 
     public const uint CREATE_SUSPENDED = 0x00000004;
     public const uint CREATE_UNICODE_ENVIRONMENT = 0x00000400;
+    public const uint CREATE_NO_WINDOW = 0x08000000;
+    public const uint STARTF_USESTDHANDLES = 0x00000100;
     public const int JobObjectBasicProcessIdListInformation = 3;
     // JOBOBJECTINFOCLASS 枚举从 1 开始：Accounting=1, BasicLimit=2, ProcessIdList=3, ...
     public const int JobObjectBasicAccountingInformation = 1;

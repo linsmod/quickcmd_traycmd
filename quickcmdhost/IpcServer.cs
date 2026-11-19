@@ -38,6 +38,15 @@ internal static class IpcServer
         Program.RequestExit();
     }
 
+    // 供进程内调用（WebConsole）复用同一套 op 处理：这里的 JSON 序列化/反序列化
+    // 只是边界折返，避免把 Handle 的每个分支都改成返回对象。
+    public static QchostResponse HandleMessage(IpcMessage msg, out bool shutdown)
+    {
+        var json = Handle(JsonSerializer.Serialize(msg, Store.JsonOpts), out shutdown);
+        try { return JsonSerializer.Deserialize<QchostResponse>(json, Store.JsonOpts); }
+        catch { return new QchostResponse { Ok = false, Message = "内部错误" }; }
+    }
+
     private static string Handle(string line, out bool shutdown)
     {
         shutdown = false;
@@ -49,6 +58,11 @@ internal static class IpcServer
             {
                 case "ping":
                     return Ok("qchost");
+
+                case "ui":
+                    return WebConsole.Url != null
+                        ? Ok(WebConsole.Url)
+                        : Err("控制台未启动（默认端口 " + Store.DefaultUiPort + " 起连续 20 个端口都被占用？）");
 
                 case "run":
                 {
@@ -67,14 +81,16 @@ internal static class IpcServer
 
                     bool useJob = !string.Equals(msg.Mode, "pid", StringComparison.OrdinalIgnoreCase);
                     var entry = NewEntry(msg, "run", c);
-                    if (Manager.Start(c, useJob, msg.RequesterPid, out var serr, out var spid, out var smode, out var sid))
+                    if (Manager.Start(c, useJob, msg.RequesterPid, out var serr, out var spid, out var smode, out var sid, out var slog))
                     {
                         entry.Status = "started";
                         entry.Mode = smode;
                         entry.InstanceId = sid;
                         entry.Pid = spid;
+                        entry.LogPath = slog ?? "";
                         AppendHistory(entry);
-                        return Ok("[" + smode + "] 已启动 " + sid + (smode == "JOB" ? "" : " pid=" + spid), entry);
+                        return Ok("[" + smode + "] 已启动 " + sid + (smode == "JOB" ? "" : " pid=" + spid)
+                                  + (slog != null ? "\n日志: " + slog : ""), entry);
                     }
                     if (serr == "max")
                     {
@@ -104,14 +120,16 @@ internal static class IpcServer
 
                     bool useJob = !string.Equals(msg.Mode, "pid", StringComparison.OrdinalIgnoreCase);
                     var entry = NewEntry(msg, "exec", c);
-                    if (Manager.Start(c, useJob, msg.RequesterPid, out var serr, out var spid, out var smode, out var sid))
+                    if (Manager.Start(c, useJob, msg.RequesterPid, out var serr, out var spid, out var smode, out var sid, out var slog))
                     {
                         entry.Status = "started";
                         entry.Mode = smode;
                         entry.InstanceId = sid;
                         entry.Pid = spid;
+                        entry.LogPath = slog ?? "";
                         AppendHistory(entry);
-                        return Ok("[" + smode + "] 已启动 " + sid + "（免注册直跑）", entry);
+                        return Ok("[" + smode + "] 已启动 " + sid + "（免注册直跑）"
+                                  + (slog != null ? "\n日志: " + slog : ""), entry);
                     }
                     entry.Status = "failed";
                     entry.Error = serr;

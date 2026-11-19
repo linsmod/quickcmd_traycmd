@@ -61,6 +61,7 @@ internal static class Launcher
             Env = (msg.Env ?? new List<string>())
                 .Select(s => (s ?? "").Trim()).Where(s => s.Length > 0).ToList(),
             KeepOpen = msg.KeepOpen,
+            CaptureLogs = msg.CaptureLogs,
             MaxInstances = 1,
             CreatedAt = DateTime.Now,
             UpdatedAt = DateTime.Now,
@@ -87,23 +88,45 @@ internal static class Launcher
         public Process Proc;
         public Job Job;
         public int Pid;
+        public string LogPath;   // 捕获输出时的日志文件；null = 未捕获
     }
 
     // 非跟踪启动（CLI 在 qchost 未运行时的兜底）：返回 null = 失败（error 为原因）
-    public static Process Launch(CommandDef c, out string error)
+    public static Process Launch(CommandDef c, out string error) => Launch(c, null, out error);
+
+    // logPath 非空 = 捕获 stdout/stderr 到该文件（CreateNoWindow，日志经中继线程写 UTF-8）
+    public static Process Launch(CommandDef c, string logPath, out string error)
     {
         var psi = BuildPsi(c, out error);
         if (psi == null) return null;
         bool hasScript = !string.IsNullOrWhiteSpace(c.ShellScript);
+        bool capture = !string.IsNullOrEmpty(logPath);
+        if (capture)
+        {
+            psi.CreateNoWindow = true;
+            psi.RedirectStandardOutput = true;
+            psi.RedirectStandardError = true;
+        }
+
+        Process Start()
+        {
+            var p = Process.Start(psi);
+            if (p != null && capture)
+            {
+                try { Directory.CreateDirectory(Path.GetDirectoryName(logPath)); } catch { }
+                LogStore.Pump(p, logPath);
+            }
+            return p;
+        }
 
         try
         {
-            return Process.Start(psi);
+            return Start();
         }
         catch (Win32Exception wex) when (!hasScript && (wex.NativeErrorCode == 2 || wex.NativeErrorCode == 3))
         {
             ApplyCmdFallback(psi, c);
-            try { return Process.Start(psi); }
+            try { return Start(); }
             catch (Exception ex) { error = "启动失败: " + ex.Message; return null; }
         }
         catch (Exception ex) { error = "启动失败: " + ex.Message; return null; }
@@ -114,7 +137,10 @@ internal static class Launcher
     // root pid 生命周期影响。作业不可用（qchost 自身已在别的作业内等）时
     // 自动退化为 PID 模式（Job=null）。
     // useJob=false（PID 模式）：直接 Process.Start，仅按 root pid 及其子孙树跟踪。
-    public static LaunchResult LaunchTracked(CommandDef c, bool useJob, out string error)
+    public static LaunchResult LaunchTracked(CommandDef c, bool useJob, out string error) =>
+        LaunchTracked(c, useJob, null, out error);
+
+    public static LaunchResult LaunchTracked(CommandDef c, bool useJob, string logPath, out string error)
     {
         var psi = BuildPsi(c, out error);
         if (psi == null) return null;
@@ -124,26 +150,34 @@ internal static class Launcher
         var job = useJob ? Job.Create() : null;
         if (job != null)
         {
-            var ok = job.TryLaunch(psi.FileName, psi.Arguments, psi.WorkingDirectory, env, out var pid, out var w32);
+            var ok = job.TryLaunch(psi.FileName, psi.Arguments, psi.WorkingDirectory, env, logPath, out var pid, out var w32);
             if (!ok && !hasScript && (w32 == 2 || w32 == 3))
             {
                 // 找不到目标（如 npm 实际是 npm.cmd）：回退交给 cmd 解析后重试
                 ApplyCmdFallback(psi, c);
-                ok = job.TryLaunch(psi.FileName, psi.Arguments, psi.WorkingDirectory, env, out pid, out w32);
+                ok = job.TryLaunch(psi.FileName, psi.Arguments, psi.WorkingDirectory, env, logPath, out pid, out w32);
             }
 
             if (ok)
             {
                 Process proc = null;
                 try { proc = Process.GetProcessById(pid); } catch { } // root 秒退：靠 Job 继续跟踪
-                return new LaunchResult { Proc = proc, Job = job, Pid = pid };
+                return new LaunchResult
+                {
+                    Proc = proc, Job = job, Pid = pid,
+                    LogPath = LogStore.Exists(logPath) ? logPath : null,
+                };
             }
 
             job.Dispose(); // 启动失败或无法入作业：走退化路径
         }
 
-        var p = Launch(c, out error);
-        return p == null ? null : new LaunchResult { Proc = p, Job = null, Pid = p.Id };
+        var p = Launch(c, logPath, out error);
+        return p == null ? null : new LaunchResult
+        {
+            Proc = p, Job = null, Pid = p.Id,
+            LogPath = LogStore.Exists(logPath) ? logPath : null,
+        };
     }
 
     // 裸命令直接启动找不到（如 npm 实际是 npm.cmd）：交给 cmd 解析 PATH、扩展名与内置命令

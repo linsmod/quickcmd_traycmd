@@ -101,4 +101,4 @@ DOM 关键节点：
 - 执行历史只取最近 60 条，无分页；更早记录只能 `quickcmd history` 查。
 - 日志固定尾部 300 行，无全文下载或更大的查看窗口。
 - 预览工具不能验证写操作（token 限制）。
-- `traycmd/dist` 当前可能落后于源码（宿主运行中无法覆盖），发布流程见 `workflows/wf-build-and-run.md`。
+- `traycmd/dist` 已于 2026-11-19 12:43 重新发布并重启 qcApp/qchost；后续发布流程见 `workflows/wf-build-and-run.md`。

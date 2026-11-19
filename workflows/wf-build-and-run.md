@@ -93,3 +93,17 @@ Invoke-WebRequest -UseBasicParsing http://127.0.0.1:41777/api/state | Select-Obj
 
 - `host status` 在线、`/api/state` 返回 200、真实控制台显示新版本。
 - 发布过程中断或失败：记录当前 dist 状态，按“回滚”恢复，未完成项登记到 `issues/INDEX.md`。
+
+## 执行记录
+
+### 2026-11-19 12:42–12:43（Web 控制台新 UI 发布）
+
+- 备份：`traycmd\dist` → `%TEMP%\opencode\dist-backup-20261119-124252`（约 923 KB）。
+- 停止：`quickcmd kill job-1` 结束「演示站点」→ `quickcmd host stop` → `Stop-Process qcApp`。
+- 确认 dist 路径下已无进程（否则文件锁会让发布留下混合版本）。
+- 发布：`cd traycmd; powershell -File .\make_dist.ps1 -Configuration Release`
+  - 构建约 1.7 秒；生成 `dist\qcApp.exe`、`qchost.exe`、`quickcmd.exe`。
+- 启动：`Start-Process traycmd\dist\qcApp.exe`（工作目录 `dist`）。qcApp 自动拉起 qchost（`qchost` 的父进程是 `qcApp`）。
+- 验证：`quickcmd host status` 在线；`/` 返回 200 且包含 `launcher-wrap`、`id="hist"`；`/api/state` 正常；Edge 截图确认为新版三栏 UI。
+- 恢复：`quickcmd run-job 97957db5` 重新启动演示站点（JOB，`job-1`），`http://127.0.0.1:41270/` 返回 200。
+- 附带验证写路径：从页面提取 token，POST `/api/pin` 取消并恢复固定（均 200），固定项顺序已恢复为原顺序。

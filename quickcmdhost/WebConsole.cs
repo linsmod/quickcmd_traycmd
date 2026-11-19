@@ -560,6 +560,7 @@ body[data-w="wide"] .pane-head .back{display:none}         /* 宽屏三栏：列
 .pane-head .s{font-size:11px;color:#8b8b95;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .pane-head .sp{flex:1}
 .pane-body{flex:1;min-height:0;overflow:auto}
+.props{padding:10px 14px 24px}
 pre.log{margin:0;padding:10px 14px;font:11.5px/1.6 Consolas,monospace;color:#c9c9d3;white-space:pre-wrap;word-break:break-all}
 .logempty{padding:30px 16px;text-align:center;color:#75777f;font-size:12.5px;line-height:1.7}
 
@@ -574,9 +575,9 @@ tr.sel td{background:#232a36}
 .failtext{color:#ff9aa8}
 .badge{display:inline-block;padding:1px 6px;border-radius:999px;background:#2c2c35;color:#a9a9b4;font-size:11px}
 .sect{color:#8b8b95;font-size:11px;letter-spacing:.04em;margin:14px 0 6px}
-.kv{display:flex;gap:10px;padding:5px 0;border-bottom:1px solid #26262c;font-size:12px}
-.kv b{flex:0 0 64px;color:#75757f;font-weight:400}
-.kv span{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:#b9b9c4}
+.kv{display:flex;align-items:flex-start;gap:10px;padding:5px 0;border-bottom:1px solid #26262c;font-size:12px}
+.kv b{flex:0 0 64px;color:#75757f;font-weight:400;line-height:1.45}
+.kv span{min-width:0;color:#b9b9c4;white-space:normal;overflow-wrap:break-word;line-height:1.45}
 .empty{padding:40px 20px;text-align:center;color:#75777f;font-size:12.5px;line-height:1.7}
 .filters{display:flex;gap:6px;flex-wrap:wrap;margin:2px 0 8px}
 .fpill{padding:2px 9px;font-size:11px;border-radius:999px;background:#24242b;border:1px solid #33333c;color:#a9a9b4;cursor:pointer}
@@ -726,8 +727,7 @@ function time(iso) {
   const d = new Date(iso);
   if (isNaN(d.getTime())) return "-";
   const p = n => String(n).padStart(2, "0");
-  return (d.getMonth() + 1) + "-" + p(d.getDate()) + " " + p(d.getHours()) + ":" + p(d.getMinutes()) + ":" + p(d.getSeconds());
-}
+  return String(d.getMonth() + 1).padStart(2, "0") + "-" + p(d.getDate()) + " " + p(d.getHours()) + ":" + p(d.getMinutes()) + ":" + p(d.getSeconds());}
 const stripSec = s => String(s).replace(/:\d\d$/, "");
 function dur(iso) {
   if (!iso) return "-";
@@ -1028,7 +1028,7 @@ function renderPane() {
 
   let body;
   if (sheet === "props") {
-    body = '<div class="pane-body">' + propsHtml(c, runs) + '</div>';
+    body = '<div class="pane-body"><div class="props">' + propsHtml(c, runs) + '</div></div>';
   } else if (!run) {
     body = '<div class="pane-body"><div class="logempty">没有选中的执行记录</div></div>';
   } else if (!run.hasLog) {
@@ -1047,25 +1047,31 @@ function renderPane() {
 }
 
 function propsHtml(c, runs) {
-  const row = (k, v) => '<div class="kv"><b>' + k + '</b><span title="' + esc(v) + '">' + esc(v) + '</span></div>';
+  const rowRaw = (k, v, html) => '<div class="kv"><b>' + k + '</b><span title="' + esc(v) + '">' + html + '</span></div>';
+  const row = (k, v) => rowRaw(k, v, esc(v));
+  // 路径/命令行在反斜杠或斜杠后可换行，避免窄面板里从单词中间断开
+  const path = v => esc(v).replace(/([\\/])/g, "$1<wbr>");
   const live = liveOf(c);
   const last = runs.find(r => !r.live);
   const env = c.env && c.env.length ? c.env.join("  ") : "(无)";
-  return '<div class="sect">属性</div>' +
+  const cmd = c.commandLine || "-";
+  const dir = c.effectiveWorkdir || c.workdir || "-";
+  return '<div class="sect">基本信息</div>' +
     row("类型", c.type === "web" ? "网站 / 常驻服务" : "程序") +
-    (c.url ? row("URL", c.url) : '') +
     row("项目", projLabel(projOf(c))) +
     row("short id", c.shortId) +
-    row("启动命令", c.commandLine || "-") +
-    row("工作目录", c.effectiveWorkdir || c.workdir || "-") +
-    row("环境变量", env) +
-    row("实例上限", c.maxInstances) +
-    row("root pid", live.length ? live.map(i => i.pid).join(", ") : "-") +
-    row("窗口", c.keepOpen ? "结束后保持" : "结束后关闭") +
-    row("日志", c.captureLogs ? "捕获（尾部 300 行）" : "未捕获") +
     row("首页固定", isPinned(c.shortId) ? "是" : "否") +
     row("更新", time(c.updatedAt)) +
+    '<div class="sect">启动</div>' +
+    (c.url ? rowRaw("URL", c.url, path(c.url)) : '') +
+    rowRaw("启动命令", cmd, path(cmd)) +
+    rowRaw("工作目录", dir, path(dir)) +
+    row("环境变量", env) +
+    row("实例上限", c.maxInstances) +
+    row("窗口", c.keepOpen ? "结束后保持" : "结束后关闭") +
+    row("日志", c.captureLogs ? "捕获（尾部 300 行）" : "未捕获") +
     '<div class="sect">执行</div>' +
+    row("root pid", live.length ? live.map(i => i.pid).join(", ") : "-") +
     row("次数", runs.length + " 次") +
     row("上次", last ? time(last.started) + " · " + (runKind(last) === "fail" ? "失败" : "已结束") + " · " + last.durText : "无");
 }

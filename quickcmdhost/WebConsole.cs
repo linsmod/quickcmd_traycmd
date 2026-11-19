@@ -509,9 +509,8 @@ body[data-w="narrow"] .pane{position:absolute;inset:0;z-index:8}
 .dots i.on{width:20px;border-radius:4px;background:#8b8b95}
 .dots.hide{display:none}
 /* 「全部」屏顶部的搜索框（抽屉式） */
-.lsearch{display:none;align-items:center;gap:8px;margin:12px 24px 0;padding:8px 12px;
+.lsearch{display:flex;align-items:center;gap:8px;margin:12px 24px 0;padding:8px 12px;
   background:#212127;border:1px solid #2e2e35;border-radius:10px}
-.lsearch.on{display:flex}
 .lsearch .ico{opacity:.65;font-size:12px}
 .lsearch input{flex:1;min-width:0;background:transparent;border:0;outline:none;color:#e8e8ea;
   font:13px/1.4 inherit;font-family:inherit}
@@ -782,9 +781,6 @@ function goScreen(i) {
 
 /* ---------- Launcher ---------- */
 function renderLauncher() {
-  const isAll = project === "全部";
-  $("#lsearch").classList.toggle("on", isAll && route === "home");
-
   if (!state) {
     $("#launcher").innerHTML = '<div class="empty">连接中…</div>';
     renderDots();
@@ -792,7 +788,8 @@ function renderLauncher() {
   }
 
   const q = launcherQuery.trim().toLowerCase();
-  let list = commandsInScreen();
+  // 有搜索词时跨项目搜索；空查询仍显示当前项目屏
+  let list = q ? cmds() : commandsInScreen();
   if (q) {
     list = list.filter(c =>
       [c.title, c.proj, c.shortId, c.commandLine, c.url, c.effectiveWorkdir].some(v => (v || "").toLowerCase().includes(q)));

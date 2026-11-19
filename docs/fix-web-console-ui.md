@@ -95,3 +95,24 @@
   - 点击顶栏搜索按钮 → 空搜索、23 个结果、焦点在 `#lq`。
 - `dotnet build quickcmdhost\quickcmd-host.csproj -c Release`：0 warning / 0 error。
 - `node --check`：页面脚本与预览工具均通过。
+
+## 2026-11-19 · 补充：搜索框常驻 + 跨项目搜索
+
+### 现象
+
+「全部」屏的搜索框时有时无：显示条件写死为 `project === "全部" && route === "home"`。切项目会立刻隐藏；打开命令页时 `openApp` 不重绘 Launcher，要等下一次数据轮询才隐藏，所以观感随机。与「直接输入强制回到全部」叠加后更让人困惑。
+
+### 修法
+
+- `.lsearch` 改为 Launcher 常驻元素（CSS `display:flex`），删除 `.lsearch.on` 与 `renderLauncher` 里的显隐切换。
+- 有查询词时跨项目搜索：`let list = q ? cmds() : commandsInScreen()`；结果 tile 的项目名仍标注来源，清空查询回到当前项目屏。
+- 直接输入 / `Ctrl+K` / 搜索按钮仍统一回首页「全部」屏并聚焦。
+
+### 验证
+
+- Edge headless（preview）：
+  - 首页「全部」：`searchDisplay=flex`，23 个 tile；
+  - 项目 `rvvm`：搜索框仍显示，1 个 tile（rvvm）；
+  - 在 `rvvm` 输入「演」：跳到全部，1 个结果，项目标签为 `demo`，证明跨项目；
+  - wide 命令页：launcher 可见，搜索框仍显示；
+  - 700px 命令页：launcher 随左栏隐藏（`leftW=0`），搜索框不可见（预期）。

@@ -107,3 +107,4 @@ Invoke-WebRequest -UseBasicParsing http://127.0.0.1:41777/api/state | Select-Obj
 - 验证：`quickcmd host status` 在线；`/` 返回 200 且包含 `launcher-wrap`、`id="hist"`；`/api/state` 正常；Edge 截图确认为新版三栏 UI。
 - 恢复：`quickcmd run-job 97957db5` 重新启动演示站点（JOB，`job-1`），`http://127.0.0.1:41270/` 返回 200。
 - 附带验证写路径：从页面提取 token，POST `/api/pin` 取消并恢复固定（均 200），固定项顺序已恢复为原顺序。
+- 2026-11-19 12:55、13:06 又按同一流程发布了两次（直接输入搜索、搜索框常驻）；每次发布前备份 dist、发布后重启演示站点，并在真实 41777 上用 Edge headless 复测。

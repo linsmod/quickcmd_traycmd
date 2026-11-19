@@ -223,3 +223,6 @@ StyleCopReport.xml
 
 
 **/dist/
+
+# Agent-maintained issue registry (not tracked by design; see AGENTS.md)
+issues/

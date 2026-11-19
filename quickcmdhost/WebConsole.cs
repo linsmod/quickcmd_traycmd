@@ -509,14 +509,6 @@ body[data-w="narrow"] .pane{position:absolute;inset:0;z-index:8}
 .dots i:hover{background:#55555f}
 .dots i.on{width:20px;border-radius:4px;background:#8b8b95}
 .dots.hide{display:none}
-/* Launcher 顶部搜索触发：点开「全部」搜索浮层 */
-.lsearch{display:flex;align-items:center;gap:8px;margin:12px 24px 0;padding:8px 12px;
-  background:#212127;border:1px solid #2e2e35;border-radius:10px;color:#75777f;text-align:left;
-  font:13px/1.4 inherit;font-family:inherit;cursor:text}
-.lsearch:hover{background:#26262e;border-color:#3a3a44}
-.lsearch .ico{opacity:.65;font-size:12px}
-.lsearch .ph{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.lsearch .kbd{font-size:11px;opacity:.6}
 /* 「全部」= 搜索浮层：盖住 Launcher，不改变右侧内容 */
 .searchpage{display:none;position:absolute;inset:0;z-index:12;flex-direction:column;background:#1b1b1f}
 body.search-open .searchpage{display:flex}
@@ -642,11 +634,6 @@ body[data-w="narrow"][data-route="app"].search-open .left{display:flex;position:
     </aside>
 
     <section class="launcher-wrap" id="launcherwrap">
-      <button class="lsearch" id="lsearchbtn" title="搜索全部命令（Ctrl+K）">
-        <span class="ico">🔍</span>
-        <span class="ph">搜索全部命令…</span>
-        <span class="kbd">Ctrl+K</span>
-      </button>
       <div class="launcher" id="launcher"></div>
       <div class="dots" id="dots"></div>
       <div class="searchpage" id="searchpage">
@@ -1593,7 +1580,6 @@ $("#refresh").addEventListener("click", load);
 $("#histbtn").addEventListener("click", openHist);
 $("#histclose").addEventListener("click", closeHist);
 $("#searchbtn").addEventListener("click", () => openSearch());
-$("#lsearchbtn").addEventListener("click", () => openSearch());
 $("#sclose").addEventListener("click", closeSearch);
 
 /* ---------- 响应式：宽=水平铺开，窄=只显示栈顶 ---------- */

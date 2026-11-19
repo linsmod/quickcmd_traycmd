@@ -4,7 +4,7 @@
 
 ## 1. 入口与运行方式
 
-- 实现文件：`quickcmdhost/WebConsole.cs`（HTTP 服务 + 内嵌单页 HTML/CSS/JS）。
+- 实现文件：`quickcmdhost/WebConsole.cs`（HTTP 服务）与 `quickcmdhost/web/index.html`（单页 HTML/CSS/JS，构建时复制到输出目录，运行时按请求读磁盘）。
 - 启动：`quickcmdhost/Program.cs` 的 `Main` 在 IPC 服务之后调用 `WebConsole.Start()`，失败不影响宿主。
 - 绑定：仅 `127.0.0.1`。
 - 端口：首选 `%APPDATA%\quickcmd\settings.json` 的 `uiPort`（当前 41777）；被占用时从首选起顺延最多 20 个端口，并回写设置。

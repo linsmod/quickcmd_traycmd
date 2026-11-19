@@ -1,8 +1,8 @@
 #!/usr/bin/env node
 // tools/preview-web-console.js
-// 预览 qchost 内嵌 Web 控制台，不需要重启宿主。
+// 预览 qchost 的 Web 控制台，不需要重启宿主。
 //
-// 做法：从 quickcmdhost/WebConsole.cs 提取内嵌 HTML（C# raw string），
+// 做法：每次请求读 quickcmdhost/web/index.html（也可用 --file 指向别的文件），
 // 注入预览 token / 端口后由本进程提供页面；
 // GET /api/state 与 /api/log 代理到正在运行的 qchost。
 // 写操作（POST /api/*）不代理：宿主 token 每次启动随机生成，只注入真实页面。
@@ -11,7 +11,7 @@
 //   node tools/preview-web-console.js
 //   node tools/preview-web-console.js --port 43999 --upstream 41777
 //   node tools/preview-web-console.js --no-upstream     # 只起静态页，API 返回离线
-//   node tools/preview-web-console.js --file quickcmdhost/WebConsole.cs
+//   node tools/preview-web-console.js --file path/to/index.html
 //
 // 仅绑定 127.0.0.1。
 
@@ -34,13 +34,13 @@ if (args.includes("--help") || args.includes("-h")) {
 
   --port <n>        预览端口（默认 43999，被占用时顺延）
   --upstream <n>    正在运行的 qchost Web 端口（默认读 settings.json 的 uiPort）
-  --file <path>     WebConsole.cs 路径（默认 quickcmdhost/WebConsole.cs）
+  --file <path>     页面文件路径（默认 quickcmdhost/web/index.html）
   --no-upstream     不代理 API（页面显示未连接）
 `);
   process.exit(0);
 }
 
-const sourceFile = path.resolve(ROOT, argValue("--file", path.join("quickcmdhost", "WebConsole.cs")));
+const sourceFile = path.resolve(ROOT, argValue("--file", path.join("quickcmdhost", "web", "index.html")));
 const startPort = Number(argValue("--port", "43999"));
 const noUpstream = args.includes("--no-upstream");
 function readSettingsPort() {
@@ -57,14 +57,7 @@ const upstreamPort = Number(argValue("--upstream", String(readSettingsPort())));
 const upstream = "http://127.0.0.1:" + upstreamPort;
 
 function extractHtml(file) {
-  const src = fs.readFileSync(file, "utf8");
-  const marker = 'private const string Html = """';
-  const start = src.indexOf(marker);
-  if (start < 0) throw new Error("在 " + file + " 中找不到内嵌 HTML（marker: " + marker + "）");
-  const from = start + marker.length;
-  const end = src.indexOf('""";', from);
-  if (end < 0) throw new Error("找不到 HTML raw string 的结束标记");
-  return src.slice(from, end).replace(/^\r?\n/, "");
+  return fs.readFileSync(file, "utf8");
 }
 
 function contentTypeOf(res) {
@@ -115,7 +108,7 @@ const server = http.createServer(async (req, res) => {
         .replace("__QC_PORT__", String(port));
     } catch (e) {
       res.writeHead(500, {"Content-Type": "text/plain; charset=utf-8"});
-      res.end("读取内嵌页面失败：" + (e && e.message || e));
+      res.end("读取页面失败：" + (e && e.message || e));
       return;
     }
     res.writeHead(200, {"Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-store"});

@@ -2,11 +2,11 @@
 
 ## 适用场景
 
-- 修改 `quickcmdhost/WebConsole.cs` 里的内嵌 HTML/CSS/JS（页面结构、样式、交互）。
+- 修改 `quickcmdhost/web/index.html` 里的 HTML/CSS/JS（页面结构、样式、交互）。
 - 不想重启 qchost（会中断用户正在运行的任务）。
 - 需要在多个视口宽度下核对布局，或验证点击/筛选/返回等交互。
 
-不适用：修改 C# 服务端逻辑、新增 HTTP 字段或端点。那时需要重新编译并重启宿主，转 `wf-build-and-run.md`。
+不适用：修改 C# 服务端逻辑、新增 HTTP 字段或端点。那种情况需要重新编译并重启宿主，转 `wf-build-and-run.md`；只改 `web/index.html` 时连重启都不用，发布后直接改 `dist\web\index.html` 刷新即可。
 
 ## 前置条件
 
@@ -19,8 +19,9 @@
 
 | 路径 | 作用 |
 |---|---|
-| `quickcmdhost/WebConsole.cs` | 内嵌页面与 HTTP 服务 |
-| `tools/preview-web-console.js` | 提取内嵌页面并提供预览/只读代理 |
+| `quickcmdhost/web/index.html` | 单页页面（HTML/CSS/JS） |
+| `quickcmdhost/WebConsole.cs` | HTTP 服务与页面装配（读文件、注入 token/端口） |
+| `tools/preview-web-console.js` | 读取页面文件并提供预览/只读代理 |
 | `docs/arch-web-console.md` | 端点、数据映射、断点 |
 | `docs/debug-web-console.md` | 调试命令与常见问题 |
 
@@ -32,10 +33,10 @@
 dotnet build quickcmdhost/quickcmd-host.csproj -v q --nologo     # 实测约 1.5–3 秒（增量）
 ```
 
-只改了 HTML 时也必须过一遍编译（raw string 在 C# 里）。再把 `<script>` 抽出来检查 JS：
+只改了 HTML 时编译不是必须的（页面不在 raw string 里了），但改了 C# 服务端仍然要编译。再把 `<script>` 抽出来检查 JS：
 
 ```powershell
-$src = Get-Content quickcmdhost\WebConsole.cs -Raw
+$src = Get-Content quickcmdhost\web\index.html -Raw
 $m = [regex]::Match($src, '(?s)<script>(.*?)</script>')
 [IO.File]::WriteAllText("$env:TEMP\qc-console.js", $m.Groups[1].Value)
 node --check "$env:TEMP\qc-console.js"
@@ -48,7 +49,7 @@ node tools/preview-web-console.js --port 43999
 ```
 
 - 浏览器打开 `http://127.0.0.1:43999/`。
-- 工具每次请求重读源码，改完保存后刷新页面即可。
+- 工具每次请求重读 `web/index.html`，改完保存后刷新页面即可。
 - 只代理 GET `/api/state`、`/api/log`；写操作返回 501。
 - 上游端口不对时用 `--upstream 41777`；只调样式时可用 `--no-upstream`。
 

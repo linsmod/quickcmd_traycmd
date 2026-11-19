@@ -6,7 +6,7 @@
 - 需要刷新 `traycmd/dist` 发布目录。
 - 排障：确认当前运行的是哪个版本、端口和宿主状态。
 
-不适用：只改 `WebConsole.cs` 内嵌 HTML。那种情况先走 `wf-preview-and-verify-web-ui.md`，确认后再按本流程发布。
+不适用：只改 `quickcmdhost/web/index.html`（页面已是独立文件，预览工具刷新即可，无需重启或重编）。
 
 ## 环境与布局
 
@@ -87,7 +87,7 @@ Invoke-WebRequest -UseBasicParsing http://127.0.0.1:41777/api/state | Select-Obj
 - **自动启动**：宿主启动后会按命令的 `--auto-start` 自动拉起 web 服务（`Program.AutoStartWeb`），验证时不要误判为“上次实例还在”。
 - **端口顺延**：首选端口被占用时宿主会 +1 顺延并回写 settings；文档里的 41777 以当前 settings 为准。
 - **tasks 会掉跟踪**：宿主重启后旧 JOB 实例的跟踪/停止能力取决于进程本身是否存活；重启前告知用户。
-- 只改内嵌页面时不必走 dist，预览工具即可；发布是最后一步。
+- 只改页面时不必走 dist，预览工具即可；发布后也只需覆盖 `dist\web\index.html` 并刷新。
 
 ## 退出条件
 

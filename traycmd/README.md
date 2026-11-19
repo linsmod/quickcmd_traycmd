@@ -22,7 +22,7 @@
 | `src/IconExtractor.cs` | 命令项图标提取 |
 | `Serve.cs`（仓库 `traycmd/Serve.cs`） | 内置静态文件服务（`quickcmd serve`：Range/ETag/index/SPA 回退/路径逃逸防护） |
 | `LogStore.cs`（仓库 `quickcmd.shared/LogStore.cs`） | 输出日志：可继承文件句柄、中继线程、尾部读取（UTF-8→GBK 回退）、自动清理 |
-| `WebConsole.cs`（仓库 `quickcmdhost/WebConsole.cs`） | 本地 Web 控制台：单页 UI + `/api/state`/`run`/`kill`，loopback + Host/Origin/Token 校验 |
+| `web/index.html`（仓库 `quickcmdhost/web/index.html`） | 本地 Web 控制台页面：单页 UI，运行时读磁盘，不重启即可更新 |
 | `src/Job.cs` | **Windows 作业对象封装**（挂起启动 + 指派 + 整树存活/击杀） |
 | `src/Launcher.cs` | 命令定义 → 真实进程（解释器解析、cmd 兜底、作业跟踪） |
 | `src/Manager.cs` | 运行实例、`WindowFinder`、`Manager`（存活/置前/结束） |

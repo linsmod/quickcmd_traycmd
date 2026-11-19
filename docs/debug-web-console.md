@@ -4,14 +4,14 @@
 
 ## 1. 快速预览（不重启宿主）
 
-页面内嵌在 `quickcmdhost/WebConsole.cs`，改完源码后如果直接重启宿主验证，会中断正在运行的任务。用预览工具只重载页面：
+页面独立在 `quickcmdhost/web/index.html`（构建时复制到输出目录，宿主每次请求读磁盘，改完刷新即可；缺失时用内嵌副本兜底）。改完源码后如果直接重启宿主验证，会中断正在运行的任务。用预览工具只重载页面：
 
 ```powershell
 node tools/preview-web-console.js
 # 默认 http://127.0.0.1:43999/ ，上游读 %APPDATA%\quickcmd\settings.json 的 uiPort
 ```
 
-- 工具每次请求都重新读取 `WebConsole.cs`，改完源码刷新页面即可，不需要重启 qchost，也不需要重新编译（只改了 HTML 时）。
+- 工具每次请求都重新读取 `web/index.html`，改完刷新页面即可，不需要重启 qchost，也不需要重新编译（只改了 HTML 时）。
 - `GET /api/state`、`/api/log` 代理到真实宿主（默认 41777）。
 - `POST /api/*` 返回 501：预览页里的启动/停止/固定会失败，这是预期行为；写操作请在真实控制台验证。
 - 上游不在时会返回 502，页面显示「控制台未连接」。
@@ -81,7 +81,7 @@ setTimeout(function () { document.querySelector('[data-open-sheet="props"]').cli
 | 日志 404 /「日志还没有内容」 | 命令未开 `--capture-logs`，或日志已被清理 |
 | 无日志按钮 | 历史记录里的日志文件已不存在，`/api/state` 已把 `logPath` 置空 |
 | 布局断点不符合预期 | 断点按「右半区宽度」算：`rightW = 窗口 - 项目栏(≥1500 才有 216) - Launcher(clamp 300/29%/462)` |
-| 改了 HTML 但页面没变 | 预览工具每次读源码，刷新即可；真实控制台需要重新编译并重启宿主 |
+| 改了 HTML 但页面没变 | 预览工具每次读 `web/index.html`，刷新即可；真实控制台每次请求也读 `web/index.html`（装好的在 `dist\web\`），改文件后刷新即可，只有 C# 端点变化才需要重新编译并重启宿主 |
 | 停不掉/覆盖不了 dist | qchost/qcApp 正在占用 dist 里的文件，先停宿主并退出托盘，见 `workflows/wf-build-and-run.md` |
 
 ## 6. 构建
@@ -90,10 +90,10 @@ setTimeout(function () { document.querySelector('[data-open-sheet="props"]').cli
 dotnet build quickcmdhost/quickcmd-host.csproj -v q --nologo   # 实测约 1.5–3 秒
 ```
 
-编译只验证 C#；内嵌 JS 的语法可用下面的方式先抽出来检查：
+编译只验证 C#；页面里的 JS 可抽出来检查：
 
 ```powershell
-$src = Get-Content quickcmdhost\WebConsole.cs -Raw
+$src = Get-Content quickcmdhost\web\index.html -Raw
 $m = [regex]::Match($src, '(?s)<script>(.*?)</script>')
 [IO.File]::WriteAllText("$env:TEMP\qc-console.js", $m.Groups[1].Value)
 node --check "$env:TEMP\qc-console.js"

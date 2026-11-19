@@ -4,7 +4,7 @@
 
 | 工作流 | 适用场景 | 状态 |
 |---|---|---|
-| [wf-preview-and-verify-web-ui.md](wf-preview-and-verify-web-ui.md) | 改 `quickcmdhost/WebConsole.cs` 的内嵌页面：不重启宿主预览、Edge headless 验证布局与交互 | 可用 |
+| [wf-preview-and-verify-web-ui.md](wf-preview-and-verify-web-ui.md) | 改 `quickcmdhost/web/index.html`：不重启宿主预览、Edge headless 验证布局与交互 | 可用 |
 | [wf-build-and-run.md](wf-build-and-run.md) | 改 C# 源码后编译、生成 `traycmd/dist`、安全重启 qchost / 托盘 | 可用 |
 
 ## 说明

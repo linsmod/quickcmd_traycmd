@@ -18,4 +18,10 @@
     <ProjectReference Include="..\quickcmd.shared\quickcmd.shared.csproj" />
   </ItemGroup>
 
+  <ItemGroup>
+    <!-- 页面独立成文件：随输出复制，运行时优先读磁盘，改完刷新即可；内嵌副本仅作兜底 -->
+    <None Update="web\index.html" CopyToOutputDirectory="PreserveNewest" />
+    <EmbeddedResource Include="web\index.html" LogicalName="QuickCmd.WebConsole.html" />
+  </ItemGroup>
+
 </Project>

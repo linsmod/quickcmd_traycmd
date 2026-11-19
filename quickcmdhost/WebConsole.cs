@@ -498,9 +498,10 @@ body[data-w="narrow"] .pane{position:absolute;inset:0;z-index:8}
 
 .launcher{flex:1;min-height:0;overflow:auto;padding:22px 24px 62px}
 /* 滚动条不占位：桌面用滚轮/触控板，视觉上按 overlay 处理 */
-.launcher,.app-body,.pane-body,.side,.modal-body{scrollbar-width:none;-ms-overflow-style:none}
+.launcher,.app-body,.pane-body,.side,.modal-body,.search-results{scrollbar-width:none;-ms-overflow-style:none}
 .launcher::-webkit-scrollbar,.app-body::-webkit-scrollbar,
-.pane-body::-webkit-scrollbar,.side::-webkit-scrollbar,.modal-body::-webkit-scrollbar{width:0;height:0}
+.pane-body::-webkit-scrollbar,.side::-webkit-scrollbar,.modal-body::-webkit-scrollbar,
+.search-results::-webkit-scrollbar{width:0;height:0}
 .home{display:grid;grid-template-columns:repeat(auto-fill,minmax(120px,1fr));gap:18px 12px}
 
 .dots{position:absolute;left:0;right:0;bottom:14px;display:flex;justify-content:center;align-items:center;gap:7px;pointer-events:auto}
@@ -508,13 +509,28 @@ body[data-w="narrow"] .pane{position:absolute;inset:0;z-index:8}
 .dots i:hover{background:#55555f}
 .dots i.on{width:20px;border-radius:4px;background:#8b8b95}
 .dots.hide{display:none}
-/* 「全部」屏顶部的搜索框（抽屉式） */
+/* Launcher 顶部搜索触发：点开「全部」搜索浮层 */
 .lsearch{display:flex;align-items:center;gap:8px;margin:12px 24px 0;padding:8px 12px;
-  background:#212127;border:1px solid #2e2e35;border-radius:10px}
+  background:#212127;border:1px solid #2e2e35;border-radius:10px;color:#75777f;text-align:left;
+  font:13px/1.4 inherit;font-family:inherit;cursor:text}
+.lsearch:hover{background:#26262e;border-color:#3a3a44}
 .lsearch .ico{opacity:.65;font-size:12px}
-.lsearch input{flex:1;min-width:0;background:transparent;border:0;outline:none;color:#e8e8ea;
+.lsearch .ph{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.lsearch .kbd{font-size:11px;opacity:.6}
+/* 「全部」= 搜索浮层：盖住 Launcher，不改变右侧内容 */
+.searchpage{display:none;position:absolute;inset:0;z-index:12;flex-direction:column;background:#1b1b1f}
+body.search-open .searchpage{display:flex}
+.search-head{display:flex;align-items:center;gap:8px;margin:12px 24px 0;padding:8px 12px;
+  background:#212127;border:1px solid #3a3a44;border-radius:10px;flex:0 0 auto}
+.search-head .ico{opacity:.65;font-size:12px}
+.search-head input{flex:1;min-width:0;background:transparent;border:0;outline:none;color:#e8e8ea;
   font:13px/1.4 inherit;font-family:inherit}
-.lsearch input::placeholder{color:#75777f}
+.search-head input::placeholder{color:#75777f}
+.search-head button{width:24px;height:24px;padding:0;line-height:20px;border-radius:6px;flex:0 0 auto}
+.search-results{flex:1;min-height:0;overflow:auto;padding:18px 24px 24px}
+.search-foot{padding:8px 24px;border-top:1px solid #2e2e35;color:#75777f;font-size:11px;flex:0 0 auto}
+.search-empty{padding:40px 20px;text-align:center;color:#75777f;font-size:12.5px;line-height:1.7}
+.tile.on{background:#232a36;border-color:#3d4f63}
 .tile{position:relative;display:flex;flex-direction:column;align-items:center;gap:7px;padding:14px 8px 12px;
   border-radius:12px;border:1px solid transparent;cursor:pointer;user-select:none}
 .tile:hover{background:#212127;border-color:#2e2e35}
@@ -602,6 +618,8 @@ body[data-w="narrow"] .kbd{display:none}
 body[data-w="narrow"] .app-head{height:auto;min-height:52px;padding:8px 12px;flex-wrap:wrap;row-gap:8px;overflow:visible}
 body[data-w="narrow"] .app-head .acts{width:100%;justify-content:flex-end;flex-wrap:wrap}
 body[data-w="narrow"] .pane-head .s{display:none}
+/* 窄屏命令页里打开搜索：把 Launcher 临时铺到整屏（不改变 route / 右侧内容） */
+body[data-w="narrow"][data-route="app"].search-open .left{display:flex;position:absolute;inset:0;z-index:12;background:#1b1b1f}
 </style>
 </head>
 <body data-route="home" data-w="wide">
@@ -624,12 +642,22 @@ body[data-w="narrow"] .pane-head .s{display:none}
     </aside>
 
     <section class="launcher-wrap" id="launcherwrap">
-      <div class="lsearch" id="lsearch">
+      <button class="lsearch" id="lsearchbtn" title="搜索全部命令（Ctrl+K）">
         <span class="ico">🔍</span>
-        <input id="lq" placeholder="搜索全部命令…" autocomplete="off" spellcheck="false">
-      </div>
+        <span class="ph">搜索全部命令…</span>
+        <span class="kbd">Ctrl+K</span>
+      </button>
       <div class="launcher" id="launcher"></div>
       <div class="dots" id="dots"></div>
+      <div class="searchpage" id="searchpage">
+        <div class="search-head">
+          <span class="ico">🔍</span>
+          <input id="sq" placeholder="搜索全部命令…" autocomplete="off" spellcheck="false">
+          <button class="ghost" id="sclose" title="关闭 (Esc)">✕</button>
+        </div>
+        <div class="search-results" id="sresults"></div>
+        <div class="search-foot">↑↓ 选择 · Enter 打开 · Esc 关闭</div>
+      </div>
     </section>
   </div>
 
@@ -638,6 +666,7 @@ body[data-w="narrow"] .pane-head .s{display:none}
       <div class="re-inner">
         <div class="re-t">从左侧选择一个命令</div>
         <div class="re-s">启动 / 停止、查看执行记录与日志</div>
+        <div class="re-s">滚轮或 ←→ 切换项目屏</div>
       </div>
     </div>
     <section class="app" id="app"></section>
@@ -665,14 +694,16 @@ const INT_MIN = -2147483648;
 const $ = s => document.querySelector(s);
 
 let state = null;
-let project = "全部";        // 屏 = 项目名（"全部" / 项目 / "未分组"）
-let launcherQuery = "";
+let project = "";            // 屏 = 项目名（不再有「全部」；全部=搜索浮层）
 let route = "home";          // home | app
 let currentId = "";          // 当前命令 short id
 let sheet = null;            // null | "log" | "props"
 let selKey = "";             // 选中执行记录的稳定 key
 let runFilter = "all";       // all | live | ok | fail
 let histOpen = false;
+let searchOpen = false;
+let searchIndex = 0;
+let searchRows = [];
 let inited = false;
 let lastSig = null;
 let loading = false;
@@ -732,25 +763,45 @@ function durMs(ms) {
 function screenNames() {
   const named = [...new Set(cmds().map(projOf).filter(Boolean))].sort((a, b) => a.localeCompare(b, "zh"));
   const none = cmds().some(c => !projOf(c));
-  return ["全部", ...named, ...(none ? ["未分组"] : [])];
+  return [...named, ...(none ? ["未分组"] : [])];
 }
 function screenIndex() {
   const i = screenNames().indexOf(project);
   return i < 0 ? 0 : i;
 }
 function commandsInScreen() {
-  if (project === "全部") return cmds();
   if (project === "未分组") return cmds().filter(c => !projOf(c));
+  if (!project) return [];
   return cmds().filter(c => projOf(c) === project);
+}
+function saveProject() {
+  try { localStorage.setItem("qc.proj", project); } catch (e) { }
+}
+// 默认项目：上次浏览的项目 → 有运行中命令的项目 → 最近更新的命令所属项目 → 第一个项目
+function defaultProject(names) {
+  let saved = "";
+  try { saved = localStorage.getItem("qc.proj") || ""; } catch (e) { }
+  if (names.includes(saved)) return saved;
+  const running = cmds().find(c => c.state === "running");
+  if (running && names.includes(projLabel(projOf(running)))) return projLabel(projOf(running));
+  const latest = cmds().slice().sort((a, b) => new Date(b.updatedAt) - new Date(a.updatedAt))[0];
+  if (latest && names.includes(projLabel(projOf(latest)))) return projLabel(projOf(latest));
+  return names[0];
 }
 
 function renderProjects() {
-  let html = "";
+  const all = cmds();
+  const allRunning = all.filter(c => c.state === "running").length;
+  let html = '<div class="pitem' + (searchOpen ? " on" : "") + '" data-searchall="1" title="搜索全部命令（Ctrl+K）">' +
+    '<span class="pname">全部</span>' +
+    (allRunning ? '<span class="dot up" title="' + allRunning + ' 个运行中"></span>' : '') +
+    '<span class="cnt">' + all.length + '</span></div>';
+
   for (const n of screenNames()) {
-    const list = n === "全部" ? cmds() : (n === "未分组" ? cmds().filter(c => !projOf(c)) : cmds().filter(c => projOf(c) === n));
+    const list = n === "未分组" ? all.filter(c => !projOf(c)) : all.filter(c => projOf(c) === n);
     if (n === "未分组") html += '<div class="psep"></div>';
     const running = list.filter(c => c.state === "running").length;
-    html += '<div class="pitem' + (project === n ? " on" : "") + '" data-proj="' + esc(n) + '" title="' + esc(n) + '">' +
+    html += '<div class="pitem' + (!searchOpen && project === n ? " on" : "") + '" data-proj="' + esc(n) + '" title="' + esc(n) + '">' +
       '<span class="pname">' + esc(n) + '</span>' +
       (running ? '<span class="dot up" title="' + running + ' 个运行中"></span>' : '') +
       '<span class="cnt">' + list.length + '</span></div>';
@@ -763,16 +814,23 @@ function renderDots() {
   const cur = screenIndex();
   $("#dots").innerHTML = names.map((n, i) =>
     '<i class="' + (i === cur ? "on" : "") + '" data-screen="' + i + '" title="' + esc(n) + '"></i>').join("");
-  $("#dots").classList.toggle("hide", !!launcherQuery.trim() || names.length < 2);
+  $("#dots").classList.toggle("hide", searchOpen || names.length < 2);
 }
 
 function goScreen(i) {
+  closeSearch();
   const names = screenNames();
-  if (!names.length) return;
+  if (!names.length) {
+    project = "";
+    renderProjects();
+    renderLauncher();
+    renderDots();
+    setHash();
+    return;
+  }
   const next = Math.max(0, Math.min(names.length - 1, i));
   project = names[next];
-  launcherQuery = "";
-  $("#lq").value = "";
+  saveProject();
   renderProjects();
   renderLauncher();
   $("#launcher").scrollTop = 0;
@@ -780,6 +838,17 @@ function goScreen(i) {
 }
 
 /* ---------- Launcher ---------- */
+function tileHtml(c, on) {
+  const running = c.state === "running";
+  return '<div class="tile' + (on ? " on" : "") + '" data-tile="' + esc(c.shortId) + '" title="' +
+    esc(c.title + (running ? "（运行中）" : "") + " · 点击查看执行记录") + '">' +
+    '<div class="ico" style="background:hsl(' + hueOf(c.title) + ',24%,32%)">' + esc(initialsOf(c.title)) +
+      (running ? '<span class="dot up"></span>' : '') + '</div>' +
+    '<div class="tname">' + esc(c.title) + '</div>' +
+    '<div class="tproj">' + esc(projLabel(projOf(c))) + '</div>' +
+    '</div>';
+}
+
 function renderLauncher() {
   if (!state) {
     $("#launcher").innerHTML = '<div class="empty">连接中…</div>';
@@ -787,45 +856,38 @@ function renderLauncher() {
     return;
   }
 
-  const q = launcherQuery.trim().toLowerCase();
-  // 有搜索词时跨项目搜索；空查询仍显示当前项目屏
-  let list = q ? cmds() : commandsInScreen();
-  if (q) {
-    list = list.filter(c =>
-      [c.title, c.proj, c.shortId, c.commandLine, c.url, c.effectiveWorkdir].some(v => (v || "").toLowerCase().includes(q)));
-  }
-
+  const list = commandsInScreen();
   if (!list.length) {
     $("#launcher").innerHTML = '<div class="empty">' +
-      (q ? '没有匹配「' + esc(launcherQuery.trim()) + '」的命令'
-         : (cmds().length ? '这个项目还没有命令' :
-            '还没有注册任何命令。<br><br>用 <span class="mono">quickcmd add ...</span> 注册，或让 agent 帮你加。')) +
+      (cmds().length
+        ? (project ? '这个项目还没有命令' : '选择一个项目')
+        : '还没有注册任何命令。<br><br>用 <span class="mono">quickcmd add ...</span> 注册，或让 agent 帮你加。') +
       '</div>';
     renderDots();
     return;
   }
 
-  $("#launcher").innerHTML = '<div class="home">' + list.map(c => {
-    const running = c.state === "running";
-    return '<div class="tile" data-tile="' + esc(c.shortId) + '" title="' + esc(c.title + (running ? "（运行中）" : "") + " · 点击查看执行记录") + '">' +
-      '<div class="ico" style="background:hsl(' + hueOf(c.title) + ',24%,32%)">' + esc(initialsOf(c.title)) +
-        (running ? '<span class="dot up"></span>' : '') + '</div>' +
-      '<div class="tname">' + esc(c.title) + '</div>' +
-      '<div class="tproj">' + esc(projLabel(projOf(c))) + '</div>' +
-      '</div>';
-  }).join("") + '</div>';
+  $("#launcher").innerHTML = '<div class="home">' + list.map(c => tileHtml(c)).join("") + '</div>';
   renderDots();
 }
 
-// 滚轮：屏内还能滚就先滚；滚到边界之后，每格滚轮都切一屏
+// 滚轮：Launcher 内先滚动；到边界后切项目屏（搜索浮层打开时不响应）
 function onLauncherWheel(e) {
-  if (route !== "home" || launcherQuery.trim()) return;
+  if (searchOpen || !e.deltaY) return;
   const el = $("#launcher");
   const atTop = el.scrollTop <= 0;
   const atBottom = el.scrollTop + el.clientHeight >= el.scrollHeight - 1;
   const goingDown = e.deltaY > 0;
   if ((goingDown && !atBottom) || (!goingDown && !atTop)) return;
   goScreen(screenIndex() + (goingDown ? 1 : -1));
+}
+
+// 首页右侧空白区：滚轮直接切项目屏
+function onHomeWheel(e) {
+  if (route !== "home" || searchOpen || !e.deltaY) return;
+  if (e.target.closest(".side") || e.target.closest(".launcher-wrap")) return;
+  e.preventDefault();
+  goScreen(screenIndex() + (e.deltaY > 0 ? 1 : -1));
 }
 
 /* ---------- 执行记录（实例 + 历史） ---------- */
@@ -1071,6 +1133,15 @@ async function refreshLog() {
 function openApp(id) {
   const c = appById(id);
   if (!c) return;
+  const wasSearch = searchOpen;
+  if (wasSearch) closeSearch();
+  const cp = projLabel(projOf(c));
+  if ((wasSearch || project !== cp) && screenNames().includes(cp)) {
+    project = cp;
+    saveProject();
+    renderProjects();
+    renderLauncher();
+  }
   route = "app";
   currentId = c.shortId;
   selKey = "";
@@ -1209,7 +1280,7 @@ function updateTitle() {
 }
 
 function setHash() {
-  const h = "#" + encodeURIComponent(project) +
+  const h = "#" + encodeURIComponent(project || "全部") +
     (route === "app" && currentId ? "/" + encodeURIComponent(currentId) : "");
   try { history.replaceState(null, "", h); } catch (e) { }
 }
@@ -1222,10 +1293,13 @@ function applyHash() {
   let sid = i < 0 ? "" : raw.slice(i + 1);
   try { p = decodeURIComponent(p); } catch (e) { }
   try { sid = decodeURIComponent(sid); } catch (e) { }
-  if (screenNames().includes(p)) project = p;
+  const names = screenNames();
+  if (names.includes(p)) { project = p; saveProject(); }
   if (sid) {
     const c = appById(sid);
     if (c) {
+      const cp = projLabel(projOf(c));
+      if (names.includes(cp)) { project = cp; saveProject(); }
       route = "app";
       currentId = c.shortId;
       sheet = (isWide() && runsOf(c).length) ? "log" : null;
@@ -1237,7 +1311,12 @@ function applyHash() {
 
 /* ---------- 渲染入口 ---------- */
 function render() {
-  if (!screenNames().includes(project)) project = "全部";
+  const names = screenNames();
+  if (names.length && !names.includes(project)) {
+    project = defaultProject(names);
+    saveProject();
+    setHash();
+  }
   if (route === "app" && !appById(currentId)) {
     route = "home"; currentId = ""; sheet = null; selKey = "";
     document.body.dataset.route = "home";
@@ -1247,6 +1326,7 @@ function render() {
   renderLauncher();
   renderApp();
   renderPane();
+  if (searchOpen) renderSearchResults();
   if (histOpen) renderHist();
   updateMeta();
   updateTitle();
@@ -1255,12 +1335,14 @@ function render() {
 // 轮询重绘会重建 innerHTML：记录/恢复滚动位置，避免页面"跳回顶部"
 function captureScroll() {
   const g = s => { const el = $(s); return el ? {top: el.scrollTop, left: el.scrollLeft} : null; };
-  return {launcher: g("#launcher"), pane: g(".pane-body")};
+  return {launcher: g("#launcher"), app: g(".app-body"), pane: g(".pane-body"), search: g(".search-results")};
 }
 function restoreScroll(s) {
   const put = (sel, v) => { const el = $(sel); if (el && v) { el.scrollTop = v.top; el.scrollLeft = v.left; } };
   put("#launcher", s.launcher);
+  put(".app-body", s.app);
   put(".pane-body", s.pane);
+  put(".search-results", s.search);
 }
 
 async function load() {
@@ -1296,27 +1378,100 @@ async function load() {
   }
 }
 
-/* ---------- 交互 ---------- */
-function focusSearch(seed) {
-  if (histOpen) closeHist();
-  if (route !== "home") popStack("app");
-  const i = screenNames().indexOf("全部");
-  if (i >= 0) goScreen(i);
-  const inp = $("#lq");
-  inp.value = seed || "";
-  launcherQuery = inp.value;
-  renderLauncher();
-  $("#launcher").scrollTop = 0;
-  inp.focus();
-  const n = inp.value.length;
-  inp.setSelectionRange(n, n);
+/* ---------- 「全部」搜索浮层 ---------- */
+function searchQuery() {
+  const inp = $("#sq");
+  return inp ? inp.value.trim().toLowerCase() : "";
 }
+function searchList() {
+  const q = searchQuery();
+  if (!q) return cmds();
+  return cmds().filter(c =>
+    [c.title, c.proj, c.shortId, c.commandLine, c.url, c.effectiveWorkdir].some(v => (v || "").toLowerCase().includes(q)));
+}
+function renderSearchResults() {
+  const box = $("#sresults");
+  if (!box) return;
+  searchRows = searchList();
+  if (searchIndex >= searchRows.length) searchIndex = 0;
+  if (searchIndex < 0) searchIndex = 0;
+
+  if (!searchRows.length) {
+    const q = ($("#sq").value || "").trim();
+    box.innerHTML = '<div class="search-empty">' +
+      (q ? '没有匹配「' + esc(q) + '」的命令' : '还没有注册任何命令') + '</div>';
+    return;
+  }
+
+  box.innerHTML = '<div class="home">' +
+    searchRows.map((c, i) => tileHtml(c, i === searchIndex)).join("") + '</div>';
+}
+
+function openSearch(seed) {
+  if (histOpen) closeHist();
+  const inp = $("#sq");
+  const wasOpen = searchOpen;
+  searchOpen = true;
+  document.body.classList.add("search-open");
+  if (typeof seed === "string") {
+    inp.value = seed;
+    searchIndex = 0;
+  } else if (!wasOpen) {
+    inp.value = "";
+    searchIndex = 0;
+  }
+  renderProjects();
+  renderDots();
+  renderSearchResults();
+  $("#sresults").scrollTop = 0;
+  inp.focus();
+  if (typeof seed === "string") {
+    const n = inp.value.length;
+    inp.setSelectionRange(n, n);
+  } else {
+    inp.select();
+  }
+}
+
+function closeSearch() {
+  if (!searchOpen) return;
+  searchOpen = false;
+  document.body.classList.remove("search-open");
+  searchRows = [];
+  searchIndex = 0;
+  const inp = $("#sq");
+  if (inp) { inp.value = ""; try { inp.blur(); } catch (e) { } }
+  renderProjects();
+  renderDots();
+}
+
+function moveSearch(delta) {
+  if (!searchOpen || !searchRows.length) return;
+  searchIndex = (searchIndex + delta + searchRows.length) % searchRows.length;
+  renderSearchResults();
+  const on = $("#sresults .tile.on");
+  if (on) on.scrollIntoView({block: "nearest", inline: "nearest"});
+}
+
+function openSelectedSearch() {
+  if (!searchOpen || !searchRows.length) return;
+  const i = Math.max(0, Math.min(searchRows.length - 1, searchIndex));
+  openApp(searchRows[i].shortId);
+}
+
+/* ---------- 交互 ---------- */
 
 document.addEventListener("click", e => {
   if (e.target.id === "hist") { closeHist(); return; }
 
   const tile = e.target.closest("[data-tile]");
   if (tile) { openApp(tile.dataset.tile); return; }
+
+  // 搜索浮层里点空白处：把焦点还给输入框
+  if (searchOpen && e.target.closest("#searchpage") && !e.target.closest("button")) {
+    $("#sq").focus();
+    return;
+  }
 
   const pop = e.target.closest("[data-pop]");
   if (pop) { popStack(pop.dataset.pop); return; }
@@ -1388,12 +1543,17 @@ document.addEventListener("click", e => {
     return;
   }
 
+  const searchAll = e.target.closest("[data-searchall]");
+  if (searchAll) { openSearch(); return; }
+
   const dot = e.target.closest("[data-screen]");
   if (dot) { goScreen(+dot.dataset.screen); return; }
 });
 
 document.addEventListener("keydown", e => {
+  if (e.isComposing) return;
   if (e.key === "Escape") {
+    if (searchOpen) { e.preventDefault(); closeSearch(); return; }
     if (histOpen) { e.preventDefault(); closeHist(); return; }
     if (document.body.dataset.w === "wide") popStack("app");
     else popStack(sheet ? "sheet" : "app");
@@ -1401,7 +1561,13 @@ document.addEventListener("keydown", e => {
   }
   if ((e.ctrlKey || e.metaKey) && !e.shiftKey && !e.altKey && (e.key === "k" || e.key === "K")) {
     e.preventDefault();
-    focusSearch();
+    openSearch();
+    return;
+  }
+  if (searchOpen) {
+    if (e.key === "ArrowDown") { e.preventDefault(); moveSearch(1); }
+    else if (e.key === "ArrowUp") { e.preventDefault(); moveSearch(-1); }
+    else if (e.key === "Enter") { e.preventDefault(); openSelectedSearch(); }
     return;
   }
   if (histOpen) return;
@@ -1409,10 +1575,10 @@ document.addEventListener("keydown", e => {
   const ae = document.activeElement;
   const tag = (ae && ae.tagName) || "";
   const editing = tag === "INPUT" || tag === "TEXTAREA" || !!(ae && ae.isContentEditable);
-  // 直接输入即搜索（与旧版控制台一致）：任意可打印字符回到「全部」屏并以其开头
-  if (!editing && !e.isComposing) {
-    if (e.key === "/") { e.preventDefault(); focusSearch(""); return; }
-    if (e.key.length === 1 && e.key !== " ") { e.preventDefault(); focusSearch(e.key); return; }
+  // 直接输入即搜索：任意可打印字符打开「全部」搜索浮层（不改变右侧）
+  if (!editing) {
+    if (e.key === "/") { e.preventDefault(); openSearch(""); return; }
+    if (e.key.length === 1 && e.key !== " ") { e.preventDefault(); openSearch(e.key); return; }
   }
   if (route === "home" && !sheet) {
     if (editing) return;
@@ -1421,31 +1587,21 @@ document.addEventListener("keydown", e => {
   }
 });
 
-$("#launcher").addEventListener("wheel", onLauncherWheel, {passive: true});
+$("#launcherwrap").addEventListener("wheel", onLauncherWheel, {passive: true});
+$("#work").addEventListener("wheel", onHomeWheel, {passive: false});
 
-$("#lq").addEventListener("input", () => {
-  launcherQuery = $("#lq").value;
-  renderLauncher();
-  $("#launcher").scrollTop = 0;
-});
-$("#lq").addEventListener("keydown", e => {
-  if (e.key === "Escape") {                       // 只清空，不弹栈
-    e.stopPropagation();
-    $("#lq").value = "";
-    launcherQuery = "";
-    renderLauncher();
-    return;
-  }
-  if (e.key === "Enter") {                        // 打开第一个命中
-    const first = document.querySelector("#launcher [data-tile]");
-    if (first) first.click();
-  }
+$("#sq").addEventListener("input", () => {
+  searchIndex = 0;
+  renderSearchResults();
+  $("#sresults").scrollTop = 0;
 });
 
 $("#refresh").addEventListener("click", load);
 $("#histbtn").addEventListener("click", openHist);
 $("#histclose").addEventListener("click", closeHist);
-$("#searchbtn").addEventListener("click", () => focusSearch());
+$("#searchbtn").addEventListener("click", () => openSearch());
+$("#lsearchbtn").addEventListener("click", () => openSearch());
+$("#sclose").addEventListener("click", closeSearch);
 
 /* ---------- 响应式：宽=水平铺开，窄=只显示栈顶 ---------- */
 function applyWidth() {

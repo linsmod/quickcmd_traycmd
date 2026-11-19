@@ -43,7 +43,6 @@ if (args.includes("--help") || args.includes("-h")) {
 const sourceFile = path.resolve(ROOT, argValue("--file", path.join("quickcmdhost", "WebConsole.cs")));
 const startPort = Number(argValue("--port", "43999"));
 const noUpstream = args.includes("--no-upstream");
-
 function readSettingsPort() {
   try {
     const settingsFile = path.join(process.env.APPDATA || "", "quickcmd", "settings.json");
@@ -91,9 +90,9 @@ async function proxyGet(url, res, kind) {
   }
 }
 
-let html;
+// 启动时先校验一次；实际请求时再读，改完 WebConsole.cs 刷新页面即可生效
 try {
-  html = extractHtml(sourceFile);
+  extractHtml(sourceFile);
 } catch (e) {
   console.error(String(e && e.message || e));
   process.exit(1);
@@ -109,9 +108,16 @@ const server = http.createServer(async (req, res) => {
 
   if (req.method === "GET" && (url.pathname === "/" || url.pathname === "/index.html")) {
     const port = server.address().port;
-    const page = html
-      .replace("__QC_TOKEN__", "preview-token")
-      .replace("__QC_PORT__", String(port));
+    let page;
+    try {
+      page = extractHtml(sourceFile)
+        .replace("__QC_TOKEN__", "preview-token")
+        .replace("__QC_PORT__", String(port));
+    } catch (e) {
+      res.writeHead(500, {"Content-Type": "text/plain; charset=utf-8"});
+      res.end("读取内嵌页面失败：" + (e && e.message || e));
+      return;
+    }
     res.writeHead(200, {"Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-store"});
     res.end(page);
     return;

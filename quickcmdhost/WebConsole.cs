@@ -924,7 +924,7 @@ function renderApp() {
       '<div class="acts">' + acts + '</div>' +
     '</div>' +
     '<div class="app-body">' + runsHtml(c, runs) + '</div>' +
-    '<div class="hintbar">点执行记录看日志 · Ctrl+K 搜索 · Esc 返回</div>';
+    '<div class="hintbar">点执行记录看日志 · 输入即搜索 · Esc 返回</div>';
 }
 
 function runsHtml(c, all) {
@@ -1300,14 +1300,19 @@ async function load() {
 }
 
 /* ---------- 交互 ---------- */
-function focusSearch() {
+function focusSearch(seed) {
   if (histOpen) closeHist();
   if (route !== "home") popStack("app");
   const i = screenNames().indexOf("全部");
   if (i >= 0) goScreen(i);
   const inp = $("#lq");
+  inp.value = seed || "";
+  launcherQuery = inp.value;
+  renderLauncher();
+  $("#launcher").scrollTop = 0;
   inp.focus();
-  inp.select();
+  const n = inp.value.length;
+  inp.setSelectionRange(n, n);
 }
 
 document.addEventListener("click", e => {
@@ -1402,9 +1407,18 @@ document.addEventListener("keydown", e => {
     focusSearch();
     return;
   }
-  if (route === "home" && !sheet && !e.ctrlKey && !e.metaKey && !e.altKey) {
-    const tag = (document.activeElement && document.activeElement.tagName) || "";
-    if (tag === "INPUT" || tag === "TEXTAREA") return;
+  if (histOpen) return;
+  if (e.ctrlKey || e.metaKey || e.altKey) return;
+  const ae = document.activeElement;
+  const tag = (ae && ae.tagName) || "";
+  const editing = tag === "INPUT" || tag === "TEXTAREA" || !!(ae && ae.isContentEditable);
+  // 直接输入即搜索（与旧版控制台一致）：任意可打印字符回到「全部」屏并以其开头
+  if (!editing && !e.isComposing) {
+    if (e.key === "/") { e.preventDefault(); focusSearch(""); return; }
+    if (e.key.length === 1 && e.key !== " ") { e.preventDefault(); focusSearch(e.key); return; }
+  }
+  if (route === "home" && !sheet) {
+    if (editing) return;
     if (e.key === "ArrowRight" || e.key === "PageDown") { e.preventDefault(); goScreen(screenIndex() + 1); }
     if (e.key === "ArrowLeft" || e.key === "PageUp") { e.preventDefault(); goScreen(screenIndex() - 1); }
   }
@@ -1434,7 +1448,7 @@ $("#lq").addEventListener("keydown", e => {
 $("#refresh").addEventListener("click", load);
 $("#histbtn").addEventListener("click", openHist);
 $("#histclose").addEventListener("click", closeHist);
-$("#searchbtn").addEventListener("click", focusSearch);
+$("#searchbtn").addEventListener("click", () => focusSearch());
 
 /* ---------- 响应式：宽=水平铺开，窄=只显示栈顶 ---------- */
 function applyWidth() {

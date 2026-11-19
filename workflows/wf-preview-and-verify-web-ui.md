@@ -81,7 +81,7 @@ setTimeout(function () { document.querySelector('[data-open-sheet="props"]').cli
 </script>
 ```
 
-再 `--dump-dom` 检查属性面板、历史浮层、筛选结果、选中行、返回后的 `data-route`。曾用过的动作：`props`、`hist`、`failfilter`、`select2`、`replay`、`back`、`search`、`esc`、`nextscreen`。
+再 `--dump-dom` 检查属性面板、历史浮层、筛选结果、选中行、返回后的 `data-route`。曾用过的动作：`props`、`hist`、`failfilter`、`select2`、`replay`、`back`、`search`、`type`、`esc`、`nextscreen`。
 
 ### 5. 收尾
 

@@ -54,10 +54,12 @@ dotnet build quickcmdhost/quickcmd-host.csproj -v q --nologo
 Get-Process qchost,qcApp,quickcmd -ErrorAction SilentlyContinue | Select-Object Id,ProcessName,Path
 ```
 
-5. 发布：
+5. 发布（脚本在**当前目录**找 `*.sln`，解决方案位于 `traycmd\quickcmd.sln`，所以要先进 `traycmd`）：
 
 ```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -File traycmd\make_dist.ps1 -Configuration Release
+cd traycmd
+powershell -NoProfile -ExecutionPolicy Bypass -File .\make_dist.ps1 -Configuration Release
+cd ..
 ```
 
 发布前必须得到用户同意：这会停止正在运行的任务跟踪，并重建发布目录。按 `AGENTS.md` 的危险操作规则处理。

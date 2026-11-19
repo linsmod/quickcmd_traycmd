@@ -320,16 +320,23 @@ function durMs(ms) {
 }
 
 /* ---------- 项目栏 / Launcher 分屏 ---------- */
+// 项目栏顶部的固定分类（跨项目汇总 pinned 命令）
+const PIN_SCREEN = "Pinned";
+function pinnedCmds() {
+  const list = (state && state.host && state.host.pinned) || [];
+  return cmds().filter(c => list.some(x => sameShort(x, c.shortId)));
+}
 function screenNames() {
   const named = [...new Set(cmds().map(projOf).filter(Boolean))].sort((a, b) => a.localeCompare(b, "zh"));
   const none = cmds().some(c => !projOf(c));
-  return [...named, ...(none ? ["未分组"] : [])];
+  return [...new Set([...(pinnedCmds().length ? [PIN_SCREEN] : []), ...named, ...(none ? ["未分组"] : [])])];
 }
 function screenIndex() {
   const i = screenNames().indexOf(project);
   return i < 0 ? 0 : i;
 }
 function commandsInScreen() {
+  if (project === PIN_SCREEN) return pinnedCmds();
   if (project === "未分组") return cmds().filter(c => !projOf(c));
   if (!project) return [];
   return cmds().filter(c => projOf(c) === project);
@@ -351,17 +358,21 @@ function defaultProject(names) {
 
 function renderProjects() {
   const all = cmds();
+  const names = screenNames();
   let html = "";
 
-  for (const n of screenNames()) {
-    const list = n === "未分组" ? all.filter(c => !projOf(c)) : all.filter(c => projOf(c) === n);
+  names.forEach((n, i) => {
+    const list = n === PIN_SCREEN ? pinnedCmds()
+      : n === "未分组" ? all.filter(c => !projOf(c))
+      : all.filter(c => projOf(c) === n);
     if (n === "未分组") html += '<div class="psep"></div>';
     const running = list.filter(c => c.state === "running").length;
     html += '<div class="pitem' + (project === n ? " on" : "") + '" data-proj="' + esc(n) + '" title="' + esc(n) + '">' +
       '<span class="pname">' + esc(n) + '</span>' +
       (running ? '<span class="dot up" title="' + running + ' 个运行中"></span>' : '') +
       '<span class="cnt">' + list.length + '</span></div>';
-  }
+    if (n === PIN_SCREEN && i < names.length - 1) html += '<div class="psep"></div>';
+  });
   $("#projects").innerHTML = html;
 }
 
@@ -525,7 +536,7 @@ function renderApp() {
   const pinned = isPinned(c.shortId);
   acts += '<button data-open-sheet="props">属性</button>' +
     '<button data-pin="' + esc(c.shortId) + '" data-next="' + (pinned ? "0" : "1") + '" title="' +
-      (pinned ? "从首页移除" : "固定到首页") + '">' + (pinned ? "已固定" : "固定") + '</button>';
+      (pinned ? "从 Pinned 移除" : "固定到 Pinned") + '">' + (pinned ? "已固定" : "固定") + '</button>';
 
   const sub = [projLabel(projOf(c)), c.shortId, c.type === "web" ? "网站" : "程序",
       running ? "运行中" + (live.length > 1 ? " " + live.length + " 个实例" : "") : ""]
@@ -635,7 +646,7 @@ function propsHtml(c, runs) {
     row("类型", c.type === "web" ? "网站 / 常驻服务" : "程序") +
     row("项目", projLabel(projOf(c))) +
     row("short id", c.shortId) +
-    row("首页固定", isPinned(c.shortId) ? "是" : "否") +
+    row("固定", isPinned(c.shortId) ? "是" : "否") +
     row("更新", time(c.updatedAt)) +
     '<div class="sect">启动</div>' +
     (c.url ? rowRaw("URL", c.url, path(c.url)) : '') +

@@ -61,13 +61,14 @@
 DOM 关键节点：
 
 - `#work` 布局容器（尺寸观察目标）
-- `#left` > `#side`（项目） + `#launcher-wrap`（`#lsearch`/`#lq` + `#launcher` + `#dots`）
+- `#left` > `#side`（项目 + `Pinned` 分类） + `#launcher-wrap`（`#lsearch`/`#lq` + `#launcher` + `#dots`）
 - `#right` > `#rightempty`（未选中占位） + `#app` + `#pane`
 - `#hist` 执行历史浮层
 
 ## 5. 数据映射与交互状态
 
-- 页面状态：`project`（屏名：`全部` / 项目名 / `未分组`）、`launcherQuery`、`route`（`home|app`）、`currentId`（命令 short-id）、`sheet`（`null|log|props`）、`selKey`、`runFilter`（`all|live|ok|fail`）。
+- 页面状态：`project`（屏名：`Pinned` / 项目名 / `未分组`）、`launcherQuery`、`route`（`home|app`）、`currentId`（命令 short-id）、`sheet`（`null|log|props`）、`selKey`、`runFilter`（`all|live|ok|fail`）。
+- `Pinned` 分类：项目栏顶部，跨项目汇总 `host.pinned` 里的命令；有固定项时出现，最后一个取消后自动消失。
 - 执行记录 `runsOf(c)`：
   - 现运行实例 → 运行中行（含进程数、`data-since` 每秒刷新时长）；
   - `history` 中 `event=finish` 且 short-id 匹配的记录 → 已结束行（启动时间 = 完成时间 − 时长）。
